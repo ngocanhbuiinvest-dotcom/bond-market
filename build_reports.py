@@ -1,0 +1,751 @@
+# -*- coding: utf-8 -*-
+"""
+Dựng báo cáo từ bond_issuance_raw.csv:
+  1) TPDN_PhatHanh_TrongNuoc.xlsx  - Excel nhiều sheet + biểu đồ
+  2) dashboard_data.json           - dữ liệu tổng hợp cho dashboard.html
+Chạy sau bond_issuance_scraper.py
+"""
+import json
+import os
+import re
+from datetime import datetime
+
+import pandas as pd
+from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+# Phân loại ngành (13 nhóm: OVERRIDES tay -> VietCap ICB -> từ khóa) - dùng chung
+from sector_map import classify, classify_with_source, order_groups, GROUP_ORDER
+
+RAW = "bond_issuance_raw.csv"
+BBRAW = "bond_buyback_raw.csv"
+SECRAW = "bond_secondary_raw.csv"
+CATRAW = "bond_catalog_raw.csv"   # danh mục ĐKGD: crosswalk mã giao dịch <-> mã CBTT <-> ISIN <-> TCPH
+RATINGRAW = "bond_rating_raw.csv"  # xếp hạng tín nhiệm (bond_rating_scraper.py)
+LPRAW = "bond_latepay_raw.csv"     # tin bất thường / chậm trả (bond_latepay_scraper.py)
+XLSX = "TPDN_PhatHanh_TrongNuoc.xlsx"
+TY = 1e9  # 1 tỷ đồng
+
+
+# ---------- phân loại nhóm tổ chức phát hành ----------
+# classify() import từ sector_map (14 nhóm: gán tay DN lớn + từ khóa).
+
+
+def tenor_bucket(period: str, remain_days) -> str:
+    # ưu tiên tính từ số ngày kỳ hạn gốc nếu parse được
+    s = (period or "")
+    m = re.search(r"(\d+)\s*(Năm|Tháng)", s)
+    years = None
+    if m:
+        n = int(m.group(1))
+        years = n if "Năm" in m.group(2) else n / 12.0
+    if years is None:
+        return "Không xác định"
+    if years <= 1:
+        return "≤ 1 năm"
+    if years <= 3:
+        return "> 1 - 3 năm"
+    if years <= 5:
+        return "> 3 - 5 năm"
+    if years <= 10:
+        return "> 5 - 10 năm"
+    return "> 10 năm"
+
+
+def rate_bucket(r) -> str:
+    if pd.isna(r):
+        return "Không rõ"
+    if r < 6:
+        return "< 6%"
+    if r < 8:
+        return "6 - 8%"
+    if r < 10:
+        return "8 - 10%"
+    if r < 12:
+        return "10 - 12%"
+    return "≥ 12%"
+
+
+def load():
+    df = pd.read_csv(RAW)
+    df["ph_date"] = pd.to_datetime(df["ngay_phat_hanh"], format="%d/%m/%Y", errors="coerce")
+    df["post_date"] = pd.to_datetime(df["ngay_dang_tin"], format="%d/%m/%Y", errors="coerce")
+    df = df.dropna(subset=["ph_date"])
+    # Gộp các lần CÔNG BỐ LẠI của cùng một đợt phát hành (cùng mã TP + ngày phát hành):
+    # giữ bản đăng tin mới nhất để tránh cộng trùng giá trị. Vẫn giữ các đợt khác ngày phát hành.
+    n0 = len(df)
+    df = df.sort_values("post_date").drop_duplicates(["ma_tp", "ngay_phat_hanh"], keep="last")
+    print(f"Gộp trùng công bố: {n0} -> {len(df)} đợt phát hành ({df['ma_tp'].nunique()} mã TP)")
+    df["nam"] = df["ph_date"].dt.year
+    df["thang"] = df["ph_date"].dt.to_period("M").astype(str)
+    df["gia_tri_ty"] = df["gia_tri_phat_hanh"] / TY
+    _src = df["ten_dn"].apply(classify_with_source)
+    df["nhom"] = _src.apply(lambda t: t[0])
+    df["nhom_src"] = _src.apply(lambda t: t[1])   # nguồn ngành: Override / VietCap ICB / Từ khóa / Khác
+    # tóm tắt nguồn phân ngành theo giá trị (minh bạch mức đóng góp của ICB VietCap)
+    _sv = df.groupby("nhom_src")["gia_tri_ty"].sum()
+    print("Nguồn phân ngành (tỷ): " + " · ".join(f"{k} {v:,.0f}" for k, v in _sv.sort_values(ascending=False).items()))
+    df["ky_han_nhom"] = df.apply(lambda x: tenor_bucket(x["ky_han"], x["ky_han_con_lai"]), axis=1)
+    df["ls_nhom"] = df["lai_suat_num"].apply(rate_bucket)
+    # coupon bình quân gia quyền theo giá trị
+    return df
+
+
+# ---------- Excel ----------
+HDR_FILL = PatternFill("solid", fgColor="1F4E79")
+HDR_FONT = Font(color="FFFFFF", bold=True, size=10)
+THIN = Side(style="thin", color="BFBFBF")
+BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+
+
+def style_header(ws, ncols, row=1):
+    for c in range(1, ncols + 1):
+        cell = ws.cell(row=row, column=c)
+        cell.fill = HDR_FILL
+        cell.font = HDR_FONT
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = BORDER
+
+
+def write_df(ws, df, number_cols=None, pct_cols=None):
+    number_cols = number_cols or []
+    pct_cols = pct_cols or []
+    ws.append(list(df.columns))
+    for _, r in df.iterrows():
+        ws.append(list(r.values))
+    style_header(ws, len(df.columns))
+    for i, col in enumerate(df.columns, 1):
+        letter = get_column_letter(i)
+        width = max(12, min(48, int(df[col].astype(str).str.len().max() if len(df) else 12) + 2))
+        ws.column_dimensions[letter].width = width
+        if col in number_cols:
+            for row in range(2, len(df) + 2):
+                ws.cell(row=row, column=i).number_format = "#,##0"
+        if col in pct_cols:
+            for row in range(2, len(df) + 2):
+                ws.cell(row=row, column=i).number_format = "0.0%"
+    ws.freeze_panes = "A2"
+
+
+def wavg(g):
+    v = g["gia_tri_phat_hanh"]
+    r = g["lai_suat_num"]
+    mask = r.notna()
+    if v[mask].sum() == 0:
+        return None
+    return (v[mask] * r[mask]).sum() / v[mask].sum()
+
+
+def build_excel(df, out=None):
+    from openpyxl import Workbook
+    wb = Workbook()
+
+    # --- Sheet 1: Tổng quan (KPI) ---
+    ws = wb.active
+    ws.title = "Tổng quan"
+    total_val = df["gia_tri_ty"].sum()
+    now = datetime.now()
+    ytd = df[df["nam"] == df["nam"].max()]
+    kpis = [
+        ["CHỈ TIÊU", "GIÁ TRỊ"],
+        ["Số đợt phát hành", len(df)],
+        ["Số mã trái phiếu", df["ma_tp"].nunique()],
+        ["Số tổ chức phát hành", df["ten_dn"].nunique()],
+        ["Tổng giá trị phát hành (tỷ VNĐ)", round(total_val, 0)],
+        ["Giá trị bình quân/đợt (tỷ VNĐ)", round(total_val / len(df), 1)],
+        ["Coupon bình quân gia quyền (%)", round(wavg(df), 2)],
+        [f"Số đợt năm {int(df['nam'].max())}", len(ytd)],
+        [f"Giá trị năm {int(df['nam'].max())} (tỷ VNĐ)", round(ytd['gia_tri_ty'].sum(), 0)],
+        ["Khoảng thời gian dữ liệu", f"{df['ph_date'].min():%d/%m/%Y} - {df['ph_date'].max():%d/%m/%Y}"],
+        ["Cập nhật lúc", now.strftime("%d/%m/%Y %H:%M")],
+    ]
+    for r in kpis:
+        ws.append(r)
+    style_header(ws, 2)
+    ws.column_dimensions["A"].width = 40
+    ws.column_dimensions["B"].width = 26
+    for row in range(2, len(kpis) + 1):
+        ws.cell(row=row, column=1).font = Font(bold=True)
+        ws.cell(row=row, column=2).alignment = Alignment(horizontal="right")
+        if isinstance(ws.cell(row=row, column=2).value, (int, float)):
+            ws.cell(row=row, column=2).number_format = "#,##0.0"
+    ws.append([])
+    ws.append(["Nguồn: cbonds.hnx.vn - Kết quả chào bán TPDN riêng lẻ trong nước (HNX/CBIS)"])
+
+    # --- Sheet 2: Theo năm ---
+    by_year = df.groupby("nam").apply(
+        lambda g: pd.Series({
+            "So dot": len(g),
+            "Gia tri (ty VND)": round(g["gia_tri_ty"].sum(), 0),
+            "Coupon BQ (%)": round(wavg(g) or 0, 2),
+        }), include_groups=False).reset_index().rename(columns={"nam": "Nam"})
+    ws2 = wb.create_sheet("Theo năm")
+    write_df(ws2, by_year, number_cols=["So dot", "Gia tri (ty VND)"])
+    # chart
+    ch = BarChart(); ch.type = "col"; ch.title = "Giá trị phát hành theo năm (tỷ VNĐ)"
+    data = Reference(ws2, min_col=3, min_row=1, max_row=len(by_year) + 1)
+    cats = Reference(ws2, min_col=1, min_row=2, max_row=len(by_year) + 1)
+    ch.add_data(data, titles_from_data=True); ch.set_categories(cats)
+    ch.height = 8; ch.width = 16
+    ws2.add_chart(ch, "F2")
+
+    # --- Sheet 3: Theo tháng ---
+    by_month = df.groupby("thang").apply(
+        lambda g: pd.Series({
+            "So dot": len(g),
+            "Gia tri (ty VND)": round(g["gia_tri_ty"].sum(), 0),
+            "Coupon BQ (%)": round(wavg(g) or 0, 2),
+        }), include_groups=False).reset_index().rename(columns={"thang": "Thang"})
+    ws3 = wb.create_sheet("Theo tháng")
+    write_df(ws3, by_month, number_cols=["So dot", "Gia tri (ty VND)"])
+    lc = LineChart(); lc.title = "Giá trị phát hành theo tháng (tỷ VNĐ)"
+    data = Reference(ws3, min_col=3, min_row=1, max_row=len(by_month) + 1)
+    cats = Reference(ws3, min_col=1, min_row=2, max_row=len(by_month) + 1)
+    lc.add_data(data, titles_from_data=True); lc.set_categories(cats)
+    lc.height = 8; lc.width = 24
+    ws3.add_chart(lc, "F2")
+
+    # --- Sheet 4: Theo nhóm ngành ---
+    by_grp = df.groupby("nhom").apply(
+        lambda g: pd.Series({
+            "So dot": len(g),
+            "Gia tri (ty VND)": round(g["gia_tri_ty"].sum(), 0),
+            "Ty trong": g["gia_tri_ty"].sum(),
+            "Coupon BQ (%)": round(wavg(g) or 0, 2),
+        }), include_groups=False).reset_index().rename(columns={"nhom": "Nhom TCPH"})
+    by_grp["Ty trong"] = by_grp["Ty trong"] / by_grp["Ty trong"].sum()
+    by_grp = by_grp.sort_values("Gia tri (ty VND)", ascending=False)
+    ws4 = wb.create_sheet("Theo nhóm ngành")
+    write_df(ws4, by_grp, number_cols=["So dot", "Gia tri (ty VND)"], pct_cols=["Ty trong"])
+
+    # --- Sheet 5: Theo kỳ hạn & lãi suất ---
+    by_ten = df.groupby("ky_han_nhom").apply(
+        lambda g: pd.Series({"So dot": len(g), "Gia tri (ty VND)": round(g["gia_tri_ty"].sum(), 0)}),
+        include_groups=False).reset_index().rename(columns={"ky_han_nhom": "Ky han"})
+    by_rate = df.groupby("ls_nhom").apply(
+        lambda g: pd.Series({"So dot": len(g), "Gia tri (ty VND)": round(g["gia_tri_ty"].sum(), 0)}),
+        include_groups=False).reset_index().rename(columns={"ls_nhom": "Nhom lai suat"})
+    ws5 = wb.create_sheet("Kỳ hạn & Lãi suất")
+    write_df(ws5, by_ten, number_cols=["So dot", "Gia tri (ty VND)"])
+    start = len(by_ten) + 4
+    ws5.cell(row=start - 1, column=1, value="Phân bố theo nhóm lãi suất").font = Font(bold=True)
+    ws5.append([])
+    r0 = ws5.max_row + 1
+    ws5.cell(row=r0, column=1, value="Nhom lai suat"); ws5.cell(row=r0, column=2, value="So dot")
+    ws5.cell(row=r0, column=3, value="Gia tri (ty VND)")
+    style_header(ws5, 3, row=r0)
+    for _, r in by_rate.iterrows():
+        ws5.append([r["Nhom lai suat"], r["So dot"], r["Gia tri (ty VND)"]])
+
+    # --- Sheet 6: Top tổ chức phát hành ---
+    by_iss = df.groupby("ten_dn").apply(
+        lambda g: pd.Series({
+            "So dot": len(g),
+            "Gia tri (ty VND)": round(g["gia_tri_ty"].sum(), 0),
+            "Coupon BQ (%)": round(wavg(g) or 0, 2),
+        }), include_groups=False).reset_index().rename(columns={"ten_dn": "To chuc phat hanh"})
+    by_iss = by_iss.sort_values("Gia tri (ty VND)", ascending=False).head(30)
+    ws6 = wb.create_sheet("Top TCPH")
+    write_df(ws6, by_iss, number_cols=["So dot", "Gia tri (ty VND)"])
+
+    # --- Sheet 7: Dữ liệu thô ---
+    raw_cols = ["ngay_dang_tin", "ten_dn", "ma_tp", "nhom", "ky_han", "ngay_phat_hanh",
+                "ngay_dao_han", "khoi_luong_num", "menh_gia_num", "gia_tri_ty",
+                "loai_lai_suat", "lai_suat_num", "mua_lai_hoan_doi", "tinh_trang"]
+    raw = df[raw_cols].copy()
+    raw.columns = ["Ngày đăng tin", "Tổ chức phát hành", "Mã TP", "Nhóm", "Kỳ hạn",
+                   "Ngày phát hành", "Ngày đáo hạn", "Khối lượng", "Mệnh giá",
+                   "Giá trị (tỷ VNĐ)", "Loại lãi suất", "Lãi suất (%)",
+                   "Mua lại/Hoán đổi", "Tình trạng"]
+    ws7 = wb.create_sheet("Dữ liệu thô")
+    write_df(ws7, raw, number_cols=["Khối lượng", "Mệnh giá", "Giá trị (tỷ VNĐ)"])
+
+    if out is not None:
+        build_outstanding_sheets(wb, out)
+
+    wb.save(XLSX)
+    print(f"Đã tạo {XLSX} ({len(wb.sheetnames)} sheet)")
+
+
+# ---------- Mua lại & Dư nợ đang lưu hành ----------
+def load_buyback():
+    bb = pd.read_csv(BBRAW)
+    bb["dtm"] = pd.to_datetime(bb["ngay_mua_lai"], format="%d/%m/%Y", errors="coerce")
+    bb["nhom"] = bb["ten_dn"].apply(classify)
+    return bb
+
+
+def load_secondary(df, bb=None):
+    """Đọc giao dịch THỨ CẤP (bond_secondary_raw.csv, theo mã×ngày có GD) -> block cho dashboard:
+       rows cấp (mã, ngày) + meta mã->[tên DN, nhóm] + KPI toàn kỳ. Trả None nếu chưa có file."""
+    if not os.path.exists(SECRAW):
+        return None
+    sec = pd.read_csv(SECRAW)
+    sec["dtm"] = pd.to_datetime(sec["ngay_gd"], format="%d/%m/%Y", errors="coerce")
+    sec = sec.dropna(subset=["dtm"])
+    sec["gt"] = pd.to_numeric(sec["gt_num"], errors="coerce").fillna(0.0)          # đồng
+    sec["kl"] = pd.to_numeric(sec["kl_num"], errors="coerce").fillna(0).astype("int64")
+    sec = sec[sec["gt"] > 0]
+    if sec.empty:
+        return None
+    # MAP mã GIAO DỊCH -> TCPH. Mã giao dịch thứ cấp (vd VJC12101) KHÁC mã phát hành/CBTT (vd VJCH2101),
+    # nên KHÔNG join trực tiếp với bond_issuance_raw. Dùng DANH MỤC ĐKGD (bond_catalog_raw.csv) làm
+    # crosswalk chuẩn: ma_gd -> ma_cbtt/ISIN/tên TCPH (phủ 100% mã có giao dịch).
+    cat_name, cat_cbtt, cat_isin = {}, {}, {}
+    if os.path.exists(CATRAW):
+        cat = pd.read_csv(CATRAW, dtype=str).fillna("")
+        for r in cat.itertuples(index=False):
+            g = (r.ma_gd or "").strip()
+            if g and g not in cat_name:
+                cat_name[g] = (r.ten_tcph or "").strip()
+                cat_cbtt[g] = (r.ma_cbtt or "").strip()
+                cat_isin[g] = (r.isin or "").strip()
+    else:
+        print(f"CẢNH BÁO: thiếu {CATRAW} -> mã giao dịch sẽ không map được TCPH. "
+              f"Chạy: python bond_catalog_scraper.py")
+    # dự phòng: nếu 1 mã không có trong danh mục, thử bảng phát hành/mua lại
+    fb_name = dict(zip(df["ma_tp"], df["ten_dn"]))
+    if bb is not None:
+        for ma, dn in zip(bb["ma_tp"], bb["ten_dn"]):
+            fb_name.setdefault(ma, dn)
+    sec["dn"] = sec["ma_tp"].map(lambda m: cat_name.get(m) or fb_name.get(m, "")).fillna("")
+    sec["cbtt"] = sec["ma_tp"].map(lambda m: cat_cbtt.get(m, ""))
+    sec["nhom"] = sec["dn"].apply(lambda n: classify(n) if n else "Khác")
+    n_unmapped = int((sec["dn"] == "").groupby(sec["ma_tp"]).first().sum())
+    print(f"  map mã giao dịch: {sec['ma_tp'].nunique()} mã · chưa map {n_unmapped} mã (nhóm 'Khác')")
+
+    # rows cấp (mã, ngày) - gt quy về tỷ để nhẹ payload; dashboard tự lọc & tổng hợp theo ngày/tuần/tháng/quý/năm
+    sec_rows = [{"d": r.ngay_gd, "ma": r.ma_tp, "gt": round(r.gt / TY, 3), "kl": int(r.kl)}
+                for r in sec.itertuples(index=False)]
+    # meta mã -> [tên DN, nhóm, mã CBTT] (khử trùng) - mã CBTT để đối chiếu với dữ liệu phát hành
+    meta = {}
+    for r in sec.itertuples(index=False):
+        if r.ma_tp not in meta:
+            meta[r.ma_tp] = [r.dn, r.nhom, r.cbtt]
+
+    by_day = sec.groupby("ngay_gd")["gt"].sum()
+    kpi = {
+        "total_gt": round(sec["gt"].sum() / TY, 0),
+        "total_kl": int(sec["kl"].sum()),
+        "n_sessions": int(sec["ngay_gd"].nunique()),
+        "n_bonds": int(sec["ma_tp"].nunique()),
+        "avg_session": round(sec["gt"].sum() / TY / max(int(sec["ngay_gd"].nunique()), 1), 1),
+        "max_session": round(by_day.max() / TY, 1),
+        "max_day": by_day.idxmax(),
+        "first": f"{sec['dtm'].min():%d/%m/%Y}",
+        "last": f"{sec['dtm'].max():%d/%m/%Y}",
+    }
+    print(f"Giao dịch thứ cấp: {len(sec_rows):,} bản ghi (mã×ngày) · {kpi['n_sessions']} phiên · "
+          f"{kpi['total_gt']:,.0f} tỷ · BQ {kpi['avg_session']:,.1f} tỷ/phiên")
+    return {"rows": sec_rows, "meta": meta, "kpi": kpi}
+
+
+def _short_agency(s):
+    """Rút gọn tên đơn vị XHTN: lấy tên trong ngoặc nếu có (vd '...(FiinRatings)' -> 'FiinRatings')."""
+    m = re.search(r"\(([^)]+)\)\s*$", (s or "").strip())
+    return m.group(1).strip() if m else (s or "").strip()
+
+
+def load_rating():
+    """Đọc XẾP HẠNG TÍN NHIỆM (bond_rating_raw.csv) -> block cho dashboard.
+       rows cấp kết quả XHTN + nhóm ngành TCPH + KPI. Trả None nếu chưa có file."""
+    if not os.path.exists(RATINGRAW):
+        return None
+    r = pd.read_csv(RATINGRAW, dtype=str).fillna("")
+    if r.empty:
+        return None
+    r["nhom"] = r["ten_tcph"].apply(classify)
+    r["dv"] = r["don_vi_xhtn"].apply(_short_agency)
+    # đối tượng XHTN: 'tp' = Trái phiếu (có mã TP) · 'org' = Tổ chức phát hành
+    r["doi"] = r["doi_tuong_xhtn"].apply(lambda s: "tp" if "trái phiếu" in (s or "").lower() else "org")
+    rows = [{"dv": x.dv, "dvfull": x.don_vi_xhtn, "doi": x.doi, "dn": x.ten_tcph, "ma": x.ma_tp,
+             "kq": x.ket_qua_xhtn, "hl": x.hieu_luc_tu_ngay,
+             "loai": x.loai_xep_hang, "nhom": x.nhom, "file": x.file_id}
+            for x in r.itertuples(index=False)]
+    is_org = r["doi"] == "org"
+    kpi = {"n": int(len(r)), "n_tcph": int(r.loc[is_org, "ten_tcph"].nunique()),
+           "n_org": int(is_org.sum()), "n_tp": int((~is_org).sum()),
+           "n_dv": int(r["dv"].nunique())}
+    print(f"Xếp hạng tín nhiệm: {kpi['n']} kết quả ({kpi['n_org']} TCPH · {kpi['n_tp']} trái phiếu) · "
+          f"{kpi['n_tcph']} TCPH được xếp hạng · {kpi['n_dv']} đơn vị XHTN")
+    return {"rows": rows, "kpi": kpi}
+
+
+def _late_type(title):
+    """Loại chậm trả từ tiêu đề CBTT: 'goc' (gốc) · 'lai' (lãi) · 'ca_hai' (cả gốc & lãi) · 'khac'."""
+    import unicodedata
+    t = "".join(c for c in unicodedata.normalize("NFD", title or "")
+                if unicodedata.category(c) != "Mn").lower()
+    goc, lai = ("goc" in t), ("lai" in t)
+    if goc and lai:
+        return "ca_hai"
+    if goc:
+        return "goc"
+    if lai:
+        return "lai"
+    return "khac"
+
+
+def _split_codes(s):
+    return [c.strip() for c in str(s or "").split(",") if c.strip()]
+
+
+def outstanding_by_bond(df, bb):
+    """Dư nợ gốc CÒN LẠI theo mã TP (đồng) = giá trị phát hành − đã mua lại, KHÔNG trừ đáo hạn
+       (mã chậm trả tuy quá hạn danh nghĩa nhưng gốc thực tế CHƯA trả). Dùng để quy dư nợ cho mã chậm trả."""
+    dno = {}
+    if df is not None:
+        for ma, v in df.groupby("ma_tp")["gia_tri_phat_hanh"].sum().items():
+            if pd.notna(v):
+                dno[ma] = float(v)
+    if bb is not None and len(bb):
+        latest = (bb.dropna(subset=["dtm"]).sort_values("dtm")
+                    .drop_duplicates("ma_tp", keep="last"))
+        for r in latest.itertuples(index=False):
+            conlai = getattr(r, "gt_con_lai_num", None)
+            face = getattr(r, "gt_phat_hanh_num", None)
+            if pd.notna(conlai):
+                dno[r.ma_tp] = float(conlai)          # còn lại sau mua lại (bản mới nhất)
+            elif r.ma_tp not in dno and pd.notna(face):
+                dno[r.ma_tp] = float(face)
+    return dno
+
+
+def load_latepay(dno_map=None, total_out_ty=None):
+    """Đọc TIN BẤT THƯỜNG (bond_latepay_raw.csv), chỉ giữ sự kiện chậm trả/khắc phục -> block dashboard.
+       rows cấp CBTT (+ loại chậm gốc/lãi/cả hai) + nhóm ngành + dư nợ theo mã + KPI (gồm % dư nợ chậm/tổng).
+       Trả None nếu chưa có file / không có sự kiện chậm trả."""
+    if not os.path.exists(LPRAW):
+        return None
+    lp = pd.read_csv(LPRAW, dtype=str).fillna("")
+    lp = lp[lp["loai_su_kien"] != ""].copy()
+    if lp.empty:
+        return None
+    lp["nhom"] = lp["ten_dn"].apply(classify)
+    lp["lct"] = lp["tieu_de"].apply(_late_type)
+    lp["dt"] = pd.to_datetime(lp["ngay_dang_tin"], format="%d/%m/%Y", errors="coerce")
+    lp = lp.dropna(subset=["dt"]).sort_values("dt")
+    rows = [{"d": x.ngay_dang_tin, "dn": x.ten_dn, "ma": x.ma_tp, "td": x.tieu_de,
+             "loai": x.loai_su_kien, "lct": x.lct, "nhom": x.nhom, "file": x.file_id}
+            for x in lp.itertuples(index=False)]
+    cham = lp[lp["loai_su_kien"] == "cham_tra"]
+
+    # dư nợ (tỷ) theo mã chậm trả + loại chậm gộp theo mã (goc/lai/ca_hai)
+    dno_map = dno_map or {}
+    code_types, code_dno = {}, {}
+    for x in cham.itertuples(index=False):
+        for c in _split_codes(x.ma_tp):
+            code_types.setdefault(c, set()).add(x.lct)
+            if c in dno_map:
+                code_dno[c] = round(dno_map[c] / TY, 1)
+    codes = list(code_types.keys())
+    codes_goc = [c for c in codes if code_types[c] & {"goc", "ca_hai"}]
+    dno_total = round(sum(code_dno.get(c, 0.0) for c in codes), 0)
+    dno_goc = round(sum(code_dno.get(c, 0.0) for c in codes_goc), 0)
+
+    kpi = {"n_events": int(len(cham)), "n_dn": int(cham["ten_dn"].nunique()),
+           "n_ma": len(codes), "n_ma_dno": len(code_dno),
+           "n_cured": int((lp["loai_su_kien"] == "khac_phuc").sum()),
+           "dno_total": dno_total, "dno_goc": dno_goc,
+           "total_out_ty": (round(total_out_ty, 0) if total_out_ty else None),
+           "pct_total": (round(dno_total / total_out_ty * 100, 2) if total_out_ty else None),
+           "pct_goc": (round(dno_goc / total_out_ty * 100, 2) if total_out_ty else None),
+           "first": (f"{cham['dt'].min():%d/%m/%Y}" if len(cham) else ""),
+           "last": (f"{cham['dt'].max():%d/%m/%Y}" if len(cham) else "")}
+    print(f"Chậm trả gốc/lãi: {kpi['n_events']} lượt · {kpi['n_dn']} TCPH · {kpi['n_ma']} mã "
+          f"(khớp dư nợ {kpi['n_ma_dno']}) · dư nợ chậm {dno_total:,.0f} tỷ"
+          + (f" = {kpi['pct_total']}% tổng dư nợ" if kpi["pct_total"] else "")
+          + f" · {kpi['n_cured']} khắc phục")
+    return {"rows": rows, "kpi": kpi, "dno": code_dno}
+
+
+def load_updates(max_changes=300):
+    """Đọc trạng thái cập nhật (update_state.json) + nhật ký thay đổi gần đây (changes_log.csv)
+       cho tab 'Cập nhật & thay đổi'. Trả None nếu chưa chạy update_daily lần nào."""
+    state_path, log_path = "update_state.json", "changes_log.csv"
+    if not os.path.exists(state_path) and not os.path.exists(log_path):
+        return None
+    state = None
+    if os.path.exists(state_path):
+        try:
+            state = json.load(open(state_path, encoding="utf-8"))
+        except Exception:
+            state = None
+    changes = []
+    if os.path.exists(log_path):
+        try:
+            cl = pd.read_csv(log_path, dtype=str).fillna("")
+            cl = cl.tail(max_changes).iloc[::-1]   # mới nhất trước
+            changes = [{"d": r.run_date, "src": r.source, "key": r.key, "lb": r.label,
+                        "ct": r.change_type, "f": r.field, "old": r.old, "new": r.new}
+                       for r in cl.itertuples(index=False)]
+        except Exception:
+            changes = []
+    return {"state": state, "changes": changes}
+
+
+def compute_outstanding(df, bb):
+    """Dư nợ đang lưu hành cấp mã TP trên universe các đợt PHÁT HÀNH.
+       remaining = (đáo hạn->0) else (có mua lại-> 'còn lại sau mua lại' mới nhất) else (giá trị phát hành)."""
+    today = pd.Timestamp(datetime.now().date())
+    iss = df.copy()
+    iss["dh"] = pd.to_datetime(iss["ngay_dao_han"], format="%d/%m/%Y", errors="coerce")
+
+    def wcoupon(g):
+        v = g["gia_tri_phat_hanh"]; r = g["lai_suat_num"]; mk = r.notna()
+        tot = v[mk].sum()
+        return (v[mk] * r[mk]).sum() / tot if tot > 0 else None
+
+    face = iss.groupby("ma_tp").agg(
+        face=("gia_tri_phat_hanh", "sum"), dh=("dh", "max"),
+        nhom=("nhom", "first"), dn=("ten_dn", "first"),
+        khn=("ky_han_nhom", "first")).reset_index()
+    coup = (iss.groupby("ma_tp").apply(wcoupon, include_groups=False)
+              .rename("coupon").reset_index())
+    face = face.merge(coup, on="ma_tp", how="left")
+    face["nguon"] = "Phát hành"
+
+    # Bản công bố MUA LẠI mới nhất theo mã (kèm ngày đáo hạn & giá trị phát hành của bảng mua lại)
+    bb2 = bb.copy()
+    bb2["dh_bb"] = pd.to_datetime(bb2["ngay_dao_han"], format="%d/%m/%Y", errors="coerce")
+    bb_latest = (bb2.dropna(subset=["dtm"]).sort_values("dtm")
+                    .drop_duplicates("ma_tp", keep="last"))
+
+    # Ghép dư nợ còn lại + ngày đáo hạn (bản mua lại) vào universe phát hành.
+    # dh = đáo hạn MUỘN HƠN giữa 2 nguồn: bản mua lại công bố sau thường phản ánh gia hạn/điều
+    # chỉnh, cứu các mã bị ngày đáo hạn cũ ở bảng phát hành làm ép remaining=0 oan.
+    face = face.merge(bb_latest[["ma_tp", "gt_con_lai_num", "dh_bb"]], on="ma_tp", how="left")
+    face["dh"] = face[["dh", "dh_bb"]].max(axis=1)
+
+    # Mã CHỈ có ở bảng mua lại (phát hành trước phạm vi dữ liệu chào bán) -> dựng từ chính bảng mua lại.
+    only = bb_latest[~bb_latest["ma_tp"].isin(set(face["ma_tp"]))].copy()
+    only["khn"] = only["ky_han"].apply(lambda k: tenor_bucket(k, None))
+    only = only.rename(columns={"gt_phat_hanh_num": "face", "dh_bb": "dh", "ten_dn": "dn"})
+    only["coupon"] = None
+    only["nguon"] = "CBTT mua lại"
+    only = only[["ma_tp", "face", "dh", "nhom", "dn", "khn", "coupon", "gt_con_lai_num", "nguon"]]
+
+    m = pd.concat([face, only], ignore_index=True)
+    m["remaining"] = m["gt_con_lai_num"].where(m["gt_con_lai_num"].notna(), m["face"])
+    m.loc[m["dh"] < today, "remaining"] = 0
+    m["remaining"] = m["remaining"].clip(lower=0)
+    m["klcl_nam"] = ((m["dh"] - today).dt.days / 365).round(1)  # kỳ hạn còn lại (năm)
+
+    def status(r):
+        if r["remaining"] > 0:
+            return "Đang lưu hành"
+        return "Đã đáo hạn" if pd.notna(r["dh"]) and r["dh"] < today else "Đã mua lại hết"
+    m["trang_thai"] = m.apply(status, axis=1)
+    m["nam_dh"] = m["dh"].dt.year
+
+    # Universe = toàn bộ mã (phát hành ∪ mua lại) -> aggregate mua lại khớp với tab "Mua lại"
+    iss_set = set(m["ma_tp"])
+    bb_iss = bb[bb["ma_tp"].isin(iss_set)].copy()
+    bb_iss["nam_ml"] = bb_iss["dtm"].dt.year
+
+    def ser(s):
+        return [{"k": k, "v": round(v / TY, 1)} for k, v in s.items()]
+
+    active = m[m["remaining"] > 0]
+    out = {
+        "gross_ty": round(face["face"].sum() / TY, 0),
+        "outstanding_ty": round(m["remaining"].sum() / TY, 0),
+        "buyback_ty": round(bb_iss["gt_mua_lai_num"].sum() / TY, 0),
+        "n_active": int((m["remaining"] > 0).sum()),
+        "n_settled": int((m["remaining"] <= 0).sum()),
+        "n_buyback_events": int(len(bb_iss)),
+        "maturity": ser(active.groupby("nam_dh")["remaining"].sum().sort_index()),
+        "by_group": ser(active.groupby("nhom")["remaining"].sum().sort_values(ascending=False)),
+        "buyback_year": [{"k": int(k), "v": round(v / TY, 1)}
+                         for k, v in bb_iss.dropna(subset=["nam_ml"])
+                         .groupby("nam_ml")["gt_mua_lai_num"].sum().sort_index().items()],
+        "top_buyback": [{"k": (dn[:30] + "…") if len(dn) > 30 else dn, "full": dn,
+                         "v": round(v / TY, 1)}
+                        for dn, v in bb_iss.groupby("ten_dn")["gt_mua_lai_num"].sum()
+                        .sort_values(ascending=False).head(15).items()],
+        "detail": m,
+    }
+    return out
+
+
+def build_outstanding_sheets(wb, out):
+    m = out["detail"]
+    # Sheet: Dư nợ & Mua lại (tổng hợp)
+    ws = wb.create_sheet("Dư nợ & Mua lại")
+    rows = [
+        ["CHỈ TIÊU (universe đợt phát hành)", "GIÁ TRỊ (tỷ VNĐ)"],
+        ["Tổng phát hành (gross)", out["gross_ty"]],
+        ["Đã mua lại trước hạn (lũy kế)", out["buyback_ty"]],
+        ["Dư nợ đang lưu hành (hiện tại)", out["outstanding_ty"]],
+        ["Số mã còn lưu hành", out["n_active"]],
+        ["Số mã đã tất toán (đáo hạn/mua lại hết)", out["n_settled"]],
+        ["Số đợt mua lại (universe phát hành)", out["n_buyback_events"]],
+    ]
+    for r in rows:
+        ws.append(r)
+    style_header(ws, 2)
+    ws.column_dimensions["A"].width = 44
+    ws.column_dimensions["B"].width = 22
+    for row in range(2, len(rows) + 1):
+        ws.cell(row=row, column=1).font = Font(bold=True)
+        ws.cell(row=row, column=2).number_format = "#,##0"
+        ws.cell(row=row, column=2).alignment = Alignment(horizontal="right")
+
+    r0 = len(rows) + 3
+    ws.cell(row=r0, column=1, value="Dư nợ đang lưu hành theo NĂM ĐÁO HẠN (maturity wall)").font = Font(bold=True)
+    ws.cell(row=r0 + 1, column=1, value="Năm đáo hạn"); ws.cell(row=r0 + 1, column=2, value="Dư nợ (tỷ VNĐ)")
+    style_header(ws, 2, row=r0 + 1)
+    for i, x in enumerate(out["maturity"]):
+        ws.cell(row=r0 + 2 + i, column=1, value=x["k"])
+        c = ws.cell(row=r0 + 2 + i, column=2, value=x["v"]); c.number_format = "#,##0"
+    mw_first = r0 + 2
+    ch = BarChart(); ch.type = "col"; ch.title = "Dư nợ theo năm đáo hạn (tỷ VNĐ)"
+    data = Reference(ws, min_col=2, min_row=r0 + 1, max_row=r0 + 1 + len(out["maturity"]))
+    cats = Reference(ws, min_col=1, min_row=mw_first, max_row=mw_first + len(out["maturity"]) - 1)
+    ch.add_data(data, titles_from_data=True); ch.set_categories(cats)
+    ch.height = 8; ch.width = 20
+    ws.add_chart(ch, "D2")
+
+    # Sheet: Chi tiết dư nợ (cấp mã)
+    d = m[["ma_tp", "dn", "nhom", "face", "remaining", "dh", "trang_thai", "nguon"]].copy()
+    d["face"] = (d["face"] / TY).round(1)
+    d["remaining"] = (d["remaining"] / TY).round(1)
+    d["dh"] = d["dh"].dt.strftime("%d/%m/%Y")
+    d = d.sort_values("remaining", ascending=False)
+    d.columns = ["Mã TP", "Tổ chức phát hành", "Nhóm", "Giá trị phát hành (tỷ)",
+                 "Dư nợ đang lưu hành (tỷ)", "Ngày đáo hạn", "Trạng thái", "Nguồn"]
+    ws2 = wb.create_sheet("Chi tiết dư nợ")
+    write_df(ws2, d, number_cols=["Giá trị phát hành (tỷ)", "Dư nợ đang lưu hành (tỷ)"])
+
+
+# ---------- JSON cho dashboard ----------
+def build_json(df, out, bb=None, sec=None, rating=None, latepay=None):
+    def recs(d):
+        return json.loads(d.to_json(orient="records", force_ascii=False))
+
+    # thứ tự nhóm ngành CHUẨN (sector_map.GROUP_ORDER) - hợp nhất nhóm xuất hiện ở
+    # phát hành + mua lại + giao dịch thứ cấp + XHTN + chậm trả để màu/bộ lọc ổn định & đủ trên MỌI tab.
+    present = set(df["nhom"].unique())
+    if bb is not None:
+        present |= set(bb["nhom"].unique())
+    if sec:
+        present |= {v[1] for v in sec["meta"].values()}
+    if rating:
+        present |= {r["nhom"] for r in rating["rows"]}
+    if latepay:
+        present |= {r["nhom"] for r in latepay["rows"]}
+    group_order = order_groups(present)
+
+    # dữ liệu cấp-đợt cho dashboard tự lọc/tổng hợp (năm/quý/tháng theo ngày phát hành)
+    r = df.copy()
+    r["y"] = r["ph_date"].dt.year
+    r["m"] = r["ph_date"].dt.month
+    r["q"] = r["ph_date"].dt.quarter
+    rows = []
+    for _, x in r.iterrows():
+        ls = x["lai_suat_num"]
+        rows.append({
+            "ph": x["ngay_phat_hanh"], "dang": x["ngay_dang_tin"],
+            "dh": x.get("ngay_dao_han", ""),
+            "y": int(x["y"]), "m": int(x["m"]), "q": int(x["q"]),
+            "dn": x["ten_dn"], "ma": x["ma_tp"], "nhom": x["nhom"], "nghn": x.get("nhom_src", ""),
+            "kh": x["ky_han"], "khn": x["ky_han_nhom"], "lsn": x["ls_nhom"],
+            "gt": round(x["gia_tri_ty"], 1),
+            "kl": (None if pd.isna(x.get("khoi_luong_num")) else int(x["khoi_luong_num"])),
+            "ls": (None if pd.isna(ls) else round(float(ls), 2)),
+            "tt": x["tinh_trang"],
+        })
+
+    out_json = {k: v for k, v in out.items() if k != "detail"} if out else None
+
+    # dòng cấp-mã cho tab "Đang lưu hành" (chỉ trái phiếu còn dư nợ)
+    out_rows = []
+    if out is not None:
+        od = out["detail"]
+        act = od[od["remaining"] > 0].copy()
+        for _, x in act.iterrows():
+            out_rows.append({
+                "ma": x["ma_tp"], "dn": x["dn"], "nhom": x["nhom"],
+                "gt": round(x["remaining"] / TY, 1), "face": round(x["face"] / TY, 1),
+                "ls": (None if pd.isna(x["coupon"]) else round(float(x["coupon"]), 2)),
+                "khn": x["khn"], "dh": (x["dh"].strftime("%d/%m/%Y") if pd.notna(x["dh"]) else ""),
+                "y": (int(x["dh"].year) if pd.notna(x["dh"]) else 0),
+                "klcl": (None if pd.isna(x["klcl_nam"]) else float(x["klcl_nam"])),
+                "nguon": x["nguon"],
+            })
+
+    # dòng cấp-đợt cho tab "Mua lại" (toàn bộ đợt mua lại công bố)
+    bb_rows = []
+    if bb is not None:
+        b = bb.copy()
+        b["y"] = b["dtm"].dt.year
+        b["m"] = b["dtm"].dt.month
+        b["q"] = b["dtm"].dt.quarter
+        for _, x in b.iterrows():
+            bb_rows.append({
+                "ml": x.get("ngay_mua_lai", ""), "dang": x.get("ngay_dang_tin", ""),
+                "dn": x["ten_dn"], "ma": x["ma_tp"], "nhom": x["nhom"],
+                "y": (int(x["y"]) if pd.notna(x["y"]) else 0),
+                "m": (int(x["m"]) if pd.notna(x["m"]) else 0),
+                "q": (int(x["q"]) if pd.notna(x["q"]) else 0),
+                "gt": round((x.get("gt_mua_lai_num") or 0) / TY, 1),
+                "kl": (None if pd.isna(x.get("sl_mua_lai_num")) else int(x["sl_mua_lai_num"])),
+                "conlai": round((x.get("gt_con_lai_num") or 0) / TY, 1),
+                "face": round((x.get("gt_phat_hanh_num") or 0) / TY, 1),
+                "tt": x.get("tinh_trang", ""),
+            })
+
+    data = {
+        "updated": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "data_date": f"{df['post_date'].max():%d/%m/%Y}",
+        "groups": group_order,
+        "rows": rows,
+        "out": out_json,
+        "out_rows": out_rows,
+        "bb_rows": bb_rows,
+        "sec": sec,
+        "rating": rating,
+        "latepay": latepay,
+        "updates": load_updates(),
+    }
+    with open("dashboard_data.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    print("Đã tạo dashboard_data.json")
+
+    # nhúng data vào dashboard.html (self-contained, mở offline được)
+    try:
+        with open("dashboard_template.html", encoding="utf-8") as f:
+            tpl = f.read()
+        html = tpl.replace("__DATA__", json.dumps(data, ensure_ascii=False))
+        with open("dashboard.html", "w", encoding="utf-8") as f:
+            f.write(html)
+        print("Đã tạo dashboard.html")
+    except FileNotFoundError:
+        print("(!) Không thấy dashboard_template.html - bỏ qua dashboard.html")
+    return data
+
+
+if __name__ == "__main__":
+    df = load()
+    out = None
+    if os.path.exists(BBRAW):
+        bb = load_buyback()
+        out = compute_outstanding(df, bb)
+        print(f"Dư nợ đang lưu hành: {out['outstanding_ty']:,.0f} tỷ "
+              f"| Gross: {out['gross_ty']:,.0f} tỷ | Mua lại: {out['buyback_ty']:,.0f} tỷ")
+    else:
+        print("(!) Chưa có bond_buyback_raw.csv - bỏ qua phần dư nợ. Chạy bond_buyback_scraper.py trước.")
+    sec = load_secondary(df, bb if out is not None else None)
+    if sec is None:
+        print("(!) Chưa có bond_secondary_raw.csv - bỏ qua tab Giao dịch thứ cấp.")
+    rating = load_rating()
+    if rating is None:
+        print("(!) Chưa có bond_rating_raw.csv - bỏ qua tab Xếp hạng tín nhiệm.")
+    dno_map = outstanding_by_bond(df, bb if out is not None else None)
+    latepay = load_latepay(dno_map, out["outstanding_ty"] if out is not None else None)
+    if latepay is None:
+        print("(!) Chưa có bond_latepay_raw.csv - bỏ qua tab Chậm trả gốc/lãi.")
+    build_excel(df, out)
+    build_json(df, out, bb if out is not None else None, sec, rating, latepay)
+    print("Hoàn tất.")

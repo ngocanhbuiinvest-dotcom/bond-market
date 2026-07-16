@@ -1,0 +1,30 @@
+# === Dữ liệu thô scrape (tái tạo được bằng các *_scraper.py) ===
+*_raw.csv
+*_raw.json
+
+# === File sinh khi chạy / log / trạng thái ===
+update_state.json
+update_log.txt
+changes_log.csv
+alerts_new_latepay.csv
+*.prev
+
+# === Excel xuất (nặng, tái tạo bằng build_reports.py) ===
+*.xlsx
+
+# === Python cache & thư mục nháp ===
+__pycache__/
+*.py[cod]
+_scratch/
+
+# === Sub-project riêng (có CLAUDE.md + dashboard riêng, ngoài phạm vi pipeline HNX) ===
+VBMA/
+
+# === OS / editor ===
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# GIỮ (không ignore): *.py, *.ps1, run_update.bat, dashboard_template.html,
+#   dashboard.html, dashboard_data.json, STATUS.md, README.md, .gitignore
