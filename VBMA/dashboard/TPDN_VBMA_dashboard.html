@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard TPDN — Thị trường Trái phiếu Doanh nghiệp (VBMA)</title>
+<style>
+:root{
+  --plane:#f9f9f7; --surface:#fcfcfb; --surface-2:#f4f4f1;
+  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10);
+  --s1:#2a78d6; --s1-soft:#cde2fb; --s2:#1baf7a; --s3:#eb6834;
+  --up:#006300; --down:#c0392b; --pos:#2a78d6; --neg:#e34948;
+  --shadow:0 1px 2px rgba(11,11,11,.04),0 2px 8px rgba(11,11,11,.05);
+}
+:root[data-theme="dark"], html[data-theme="dark"]{
+  --plane:#0d0d0d; --surface:#1a1a19; --surface-2:#222220;
+  --ink:#fff; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+  --s1:#3987e5; --s1-soft:#184f95; --s2:#199e70; --s3:#d95926;
+  --up:#0ca30c; --down:#e66767; --pos:#3987e5; --neg:#e66767;
+  --shadow:none;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --plane:#0d0d0d; --surface:#1a1a19; --surface-2:#222220;
+    --ink:#fff; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+    --s1:#3987e5; --s1-soft:#184f95; --s2:#199e70; --s3:#d95926;
+    --up:#0ca30c; --down:#e66767; --pos:#3987e5; --neg:#e66767; --shadow:none;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--plane);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1140px;margin:0 auto;padding:28px 22px 60px}
+a{color:var(--s1)}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--ink-2);font-size:13.5px;margin-top:4px}
+header.top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;
+  flex-wrap:wrap;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:16px}
+.tools{display:flex;gap:8px;flex-shrink:0}
+.btn{font:inherit;font-size:13px;padding:7px 13px;border:1px solid var(--border);
+  background:var(--surface);color:var(--ink);border-radius:8px;cursor:pointer;
+  box-shadow:var(--shadow);white-space:nowrap}
+.btn:hover{background:var(--surface-2)}
+/* ---- filter bar (phong cách Lighthouse: navy + gold) ---- */
+:root{--navy:#051A3A;--gold:#BB9C66;--pbar-bg:#fff;--pbar-sel:#fffdf8;--pbar-ink:#051A3A;--pbar-mut:#6b7280}
+:root[data-theme="dark"],html[data-theme="dark"]{--pbar-bg:#1a1a19;--pbar-sel:#222220;--pbar-ink:#e8dcc4;--pbar-mut:#898781}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--pbar-bg:#1a1a19;--pbar-sel:#222220;--pbar-ink:#e8dcc4;--pbar-mut:#898781}}
+.pbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--pbar-bg);
+  border-left:4px solid var(--gold);border-radius:10px;padding:11px 16px;margin-bottom:18px;
+  position:sticky;top:0;z-index:30;box-shadow:0 4px 14px rgba(5,26,58,.12)}
+.pfund{background:var(--navy);color:var(--gold);font-weight:700;font-size:13.5px;
+  padding:4px 13px;border-radius:7px;letter-spacing:.3px;white-space:nowrap}
+.pbar .pl{font-size:13px;color:var(--pbar-ink);font-weight:700}
+.pbar .pdiv{width:1px;height:20px;background:var(--grid);margin:0 2px}
+.pbar select{font:inherit;font-size:13px;padding:6px 10px;border-radius:8px;min-width:132px;
+  border:2px solid var(--gold);color:var(--pbar-ink);font-weight:700;background:var(--pbar-sel);
+  cursor:pointer;box-shadow:0 1px 3px rgba(187,156,102,.28)}
+.pbar select:hover{border-color:var(--navy);background:var(--pbar-bg)}
+.pbar select:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(187,156,102,.28)}
+.pbar select:disabled{border-color:#d5d8de;color:var(--pbar-mut);background:var(--surface-2);
+  font-weight:600;opacity:.9;cursor:not-allowed;box-shadow:none}
+.pnote{font-size:12px;color:var(--pbar-mut);margin-left:auto}
+.hidden{display:none!important}
+/* ---- tabs ---- */
+.tabs{display:flex;gap:4px;margin:0 0 18px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.tab{font:inherit;font-size:14px;padding:10px 18px;border:none;background:none;
+  color:var(--ink-2);cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1px;font-weight:600}
+.tab:hover{color:var(--ink)}
+.tab.active{color:var(--s1);border-bottom-color:var(--s1)}
+.view{display:none}
+.view.active{display:block}
+/* KPI */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:14px 15px;box-shadow:var(--shadow)}
+.kpi .lab{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;
+  font-weight:600}
+.kpi .val{font-size:25px;font-weight:650;margin-top:6px;letter-spacing:-.02em;line-height:1}
+.kpi .unit{font-size:12.5px;color:var(--ink-2);font-weight:500;margin-left:3px}
+.kpi .meta{font-size:12.5px;color:var(--ink-2);margin-top:7px;display:flex;gap:10px;flex-wrap:wrap}
+.delta{font-weight:600}
+.delta.up{color:var(--up)} .delta.down{color:var(--down)}
+/* charts */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+  padding:16px 16px 12px;box-shadow:var(--shadow)}
+.card h2{font-size:14.5px;margin:0 0 2px;font-weight:640}
+.card .cs{font-size:12px;color:var(--muted);margin:0 0 8px}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--ink-2);margin:2px 0 6px;flex-wrap:wrap}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.swatch{width:11px;height:11px;border-radius:3px;display:inline-block}
+svg.chart{width:100%;height:auto;display:block;overflow:visible}
+text{font-family:inherit}
+.axlab{fill:var(--muted);font-size:11px}
+.vallab{fill:var(--ink-2);font-size:10.5px;font-weight:600}
+/* table */
+.tablecard{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+  box-shadow:var(--shadow);overflow:hidden;margin-top:16px}
+.tablecard .hd{padding:14px 16px 4px}
+.hd-flex{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.hd-flex .btn{font-size:12px;padding:6px 11px;flex-shrink:0}
+.hd-acts{display:flex;gap:8px;flex-shrink:0}
+.morerow td{text-align:center!important;padding:4px}
+.morebtn{font:inherit;font-size:12px;font-weight:600;color:var(--s1);background:none;
+  border:none;cursor:pointer;padding:6px 14px;border-radius:8px;width:100%}
+.morebtn:hover{background:var(--surface-2)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border)}
+th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.02em;
+  position:sticky;top:0;background:var(--surface)}
+td:first-child,th:first-child{text-align:left;position:sticky;left:0;background:var(--surface)}
+tbody tr:hover td{background:var(--surface-2)}
+tfoot td{font-weight:650;border-top:2px solid var(--axis);background:var(--surface)}
+.num-neg{color:var(--down)} .num-pos{color:var(--up)}
+.note{font-size:12px;color:var(--ink-2);margin-top:18px;line-height:1.6;
+  border-left:3px solid var(--s1);padding:4px 0 4px 14px}
+.note b{color:var(--ink)}
+#tip{position:fixed;pointer-events:none;z-index:50;background:var(--ink);color:var(--surface);
+  font-size:12px;padding:7px 10px;border-radius:7px;opacity:0;transition:opacity .08s;
+  box-shadow:0 4px 14px rgba(0,0,0,.25);max-width:240px;line-height:1.45}
+#tip .tt{font-weight:600;margin-bottom:3px}
+#tip b{color:#fff}
+:root[data-theme="dark"] #tip,html[data-theme="dark"] #tip{background:#000}
+.foot{margin-top:26px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--border);
+  padding-top:12px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+@media(max-width:860px){
+  .kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}
+  .range{margin-left:0;width:100%}
+}
+@media print{
+  :root{--plane:#fff;--surface:#fff;--surface-2:#fff;--shadow:none;--border:#ddd}
+  .tools,.pbar,.tabs{display:none}
+  .view{display:none}.view.active{display:block}
+  body{font-size:12px}
+  .wrap{max-width:none;padding:0}
+  .card,.kpi,.tablecard{break-inside:avoid;border:1px solid #ddd}
+  .grid2{gap:10px}
+  .foot{page-break-inside:avoid}
+  @page{margin:12mm}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Thị trường Trái phiếu Doanh nghiệp (TPDN)</h1>
+      <div class="sub">Nguồn: Báo cáo tháng VBMA · Kỳ dữ liệu <b>T1/2021 – T6/2026</b> · Đơn vị: tỷ VND ·
+        Số liệu <b>đã đính chính (restated)</b> · Cập nhật 16/07/2026</div>
+    </div>
+    <div class="tools">
+      <button class="btn" id="themeBtn">◐ Giao diện</button>
+      <button class="btn" id="printBtn">⎙ In / Xuất PDF</button>
+    </div>
+  </header>
+
+  <!-- ============ FILTER BAR: Năm → Cả năm/Quý/Tháng (phong cách Lighthouse) ============ -->
+  <div class="pbar">
+    <span class="pfund">TPDN · VBMA</span>
+    <span class="pdiv"></span>
+    <span class="pl">Kỳ:</span>
+    <select id="selYear"></select>
+    <select id="selSub" disabled></select>
+    <span class="pnote" id="pnote"></span>
+  </div>
+
+  <!-- ============ TABS ============ -->
+  <nav class="tabs">
+    <button class="tab active" data-tab="tong">Tổng hợp</button>
+    <button class="tab" data-tab="rl">Riêng lẻ</button>
+    <button class="tab" data-tab="cc">Công chúng (niêm yết)</button>
+  </nav>
+
+  <!-- ============ TAB: TỔNG HỢP ============ -->
+  <section class="view active" id="view-tong">
+    <div class="kpis" id="kpi-tong"></div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Giá trị phát hành TPDN theo tháng</h2>
+        <p class="cs">Riêng lẻ + Công chúng · nhãn = tổng phát hành</p>
+        <div class="legend">
+          <span><i class="swatch" style="background:var(--s1)"></i>Riêng lẻ</span>
+          <span><i class="swatch" style="background:var(--s2)"></i>Công chúng</span>
+        </div>
+        <svg class="chart" id="cT1" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+      <div class="card">
+        <h2>Cơ cấu phát hành: Riêng lẻ vs Công chúng</h2>
+        <p class="cs">Tỷ trọng % trên tổng phát hành mỗi tháng</p>
+        <div class="legend">
+          <span><i class="swatch" style="background:var(--s1)"></i>Riêng lẻ</span>
+          <span><i class="swatch" style="background:var(--s2)"></i>Công chúng</span>
+        </div>
+        <svg class="chart" id="cT2" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Lũy kế phát hành từ đầu năm (YTD)</h2>
+        <p class="cs">Cộng dồn theo năm dương lịch · reset về đầu mỗi năm</p>
+        <svg class="chart" id="cT3" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+      <div class="card">
+        <h2>Tăng trưởng phát hành so với cùng kỳ (%YoY)</h2>
+        <p class="cs">Tổng phát hành TPDN vs cùng kỳ năm trước · "—" = thiếu gốc so sánh</p>
+        <svg class="chart" id="cT4" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+    </div>
+    <div class="tablecard">
+      <div class="hd hd-flex"><div><h2 style="font-size:14.5px;margin:0;font-weight:640">Bảng tổng hợp toàn thị trường</h2>
+        <p class="cs" style="margin:2px 0 0">Phát hành/lũy kế = số đã đính chính; tháng mới nhất (T6/2026) tạm dùng số công bố lần đầu · dòng cuối = tổng kỳ lọc</p></div>
+        <div class="hd-acts">
+          <button class="btn" id="sort-tong" onclick="toggleSort('tong')">↓ Mới nhất trước</button>
+          <button class="btn" onclick="exportXLS('tong')">⬇ Kết xuất Excel</button>
+        </div>
+      </div>
+      <div class="scroll"><table id="tbl-tong"></table></div>
+    </div>
+  </section>
+
+  <!-- ============ TAB: RIÊNG LẺ ============ -->
+  <section class="view" id="view-rl">
+    <div class="kpis" id="kpi-rl"></div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Phát hành riêng lẻ theo tháng</h2>
+        <p class="cs">Giá trị phát hành TPDN riêng lẻ (đã đính chính)</p>
+        <svg class="chart" id="cR1" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+      <div class="card">
+        <h2>Số đợt phát hành riêng lẻ</h2>
+        <p class="cs">Số đợt phát hành mỗi tháng (công bố lần đầu)</p>
+        <svg class="chart" id="cR5" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Mua lại trước hạn theo tháng</h2>
+        <p class="cs">Giá trị TPDN được mua lại trước hạn · VBMA có số tháng từ T1/2023</p>
+        <svg class="chart" id="cR2" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+      <div class="card">
+        <h2>Tình hình chậm trả gốc/lãi</h2>
+        <p class="cs">Gốc chậm trả (cột, tỷ) và số mã chậm trả (tooltip) · VBMA công bố từ T10/2023</p>
+        <svg class="chart" id="cR6" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Giao dịch thứ cấp TPDN riêng lẻ</h2>
+        <p class="cs">GTGD trên hệ thống HNX (không đính chính, khớp tuyệt đối với HNX)</p>
+        <svg class="chart" id="cR3" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+      <div class="card">
+        <h2>Lũy kế phát hành riêng lẻ (YTD)</h2>
+        <p class="cs">Cộng dồn theo năm dương lịch · reset về đầu mỗi năm</p>
+        <svg class="chart" id="cR4" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+    </div>
+    <div class="tablecard">
+      <div class="hd hd-flex"><div><h2 style="font-size:14.5px;margin:0;font-weight:640">Bảng số liệu — TPDN riêng lẻ</h2>
+        <p class="cs" style="margin:2px 0 0">Gồm phát hành RL, mua lại trước hạn, chậm trả và giao dịch thứ cấp · dòng cuối = tổng kỳ lọc</p></div>
+        <div class="hd-acts">
+          <button class="btn" id="sort-rl" onclick="toggleSort('rl')">↓ Mới nhất trước</button>
+          <button class="btn" onclick="exportXLS('rl')">⬇ Kết xuất Excel</button>
+        </div>
+      </div>
+      <div class="scroll"><table id="tbl-rl"></table></div>
+    </div>
+  </section>
+
+  <!-- ============ TAB: CÔNG CHÚNG ============ -->
+  <section class="view" id="view-cc">
+    <div class="kpis" id="kpi-cc"></div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Phát hành công chúng theo tháng</h2>
+        <p class="cs">Giá trị phát hành TPDN ra công chúng (nguồn VBMA/SSC)</p>
+        <svg class="chart" id="cC1" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+      <div class="card">
+        <h2>Số đợt phát hành công chúng</h2>
+        <p class="cs">Số đợt phát hành ra công chúng mỗi tháng</p>
+        <svg class="chart" id="cC2" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h2>Lũy kế phát hành công chúng (YTD)</h2>
+        <p class="cs">Cộng dồn theo năm dương lịch · reset về đầu mỗi năm</p>
+        <svg class="chart" id="cC3" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+      <div class="card">
+        <h2>Tỷ trọng công chúng / tổng phát hành</h2>
+        <p class="cs">% giá trị phát hành công chúng trên tổng phát hành mỗi tháng</p>
+        <svg class="chart" id="cC4" viewBox="0 0 760 300" role="img"></svg>
+      </div>
+    </div>
+    <div class="tablecard">
+      <div class="hd hd-flex"><div><h2 style="font-size:14.5px;margin:0;font-weight:640">Bảng số liệu — TPDN phát hành công chúng</h2>
+        <p class="cs" style="margin:2px 0 0">Nguồn VBMA (số liệu SSC) · dòng cuối = tổng kỳ lọc</p></div>
+        <div class="hd-acts">
+          <button class="btn" id="sort-cc" onclick="toggleSort('cc')">↓ Mới nhất trước</button>
+          <button class="btn" onclick="exportXLS('cc')">⬇ Kết xuất Excel</button>
+        </div>
+      </div>
+      <div class="scroll"><table id="tbl-cc"></table></div>
+    </div>
+  </section>
+
+  <div class="note">
+    <b>Phương pháp:</b> Giá trị phát hành mỗi tháng lấy theo số <b>đã đính chính</b> — cột "tháng trước" trong Phụ lục 1 của báo cáo VBMA tháng kế tiếp
+    (TPDN riêng lẻ thường công bố trễ trên HNX). %MoM, %YoY và lũy kế tính lại từ chuỗi đã đính chính; GTGD thứ cấp giữ nguyên.
+    Kiểm chứng: tổng phát hành cả năm 2025 = 627.810 tỷ, khớp số trong báo cáo T6/2026.
+    Tháng mới nhất chưa có báo cáo kế tiếp nên tạm dùng số công bố lần đầu.
+    <b>Giai đoạn 2021–2023</b> (bổ sung từ 37 báo cáo VBMA): năm 2021 báo cáo chưa có Phụ lục 1 TPDN nên dùng số <b>công bố lần đầu</b>;
+    năm 2022 dùng số đính chính theo cột "cùng kỳ" của báo cáo 2023 (riêng T1–T2/2022 công bố lần đầu); từ 2023 dùng chuẩn đính chính M+1.
+    Mua lại có số tháng từ T1/2023; chậm trả từ T10/2023; GTGD thứ cấp TPDN từ T3/2024 — trước đó VBMA không công bố (ô "—").
+    %YoY chỉ tính từ T3/2023 (hai vế đều là số đính chính) và bỏ qua khi gốc &lt;500 tỷ.
+    Ô "—" = không có dữ liệu hoặc thiếu gốc so sánh (không phải bằng 0).
+  </div>
+
+  <div class="foot">
+    <span>Dashboard tạo tự động từ <code>TPDN_VBMA_tong_hop_thang.csv</code> · <code>build_dashboard.py</code></span>
+    <span>Nguồn gốc: Hiệp hội Thị trường Trái phiếu Việt Nam (VBMA) — vbma.org.vn/vi/reports/monthly</span>
+  </div>
+</div>
+
+<div id="tip"></div>
+<script>
+const DATA = [{"thang": "2021-01", "ky": "T1/2021", "ngay": "31/01/2021", "rl": 6416, "sodotRL": 7, "cc": 1610, "sodotCC": 2, "tong": 8026, "mom": null, "yoy": null, "lkRL": 6416, "lkCC": 1610, "lkTong": 8026, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2021-02", "ky": "T2/2021", "ngay": "28/02/2021", "rl": 1040, "sodotRL": 3, "cc": 1515, "sodotCC": 1, "tong": 2555, "mom": -68, "yoy": null, "lkRL": 7456, "lkCC": 3125, "lkTong": 10581, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2021-03", "ky": "T3/2021", "ngay": "31/03/2021", "rl": 5175, "sodotRL": 17, "cc": 2860, "sodotCC": 2, "tong": 8035, "mom": 214, "yoy": null, "lkRL": 12631, "lkCC": 5985, "lkTong": 18616, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2021-04", "ky": "T4/2021", "ngay": "30/04/2021", "rl": 29579.6, "sodotRL": 36, "cc": 0, "sodotCC": 0, "tong": 29579.6, "mom": 268, "yoy": null, "lkRL": 42210.6, "lkCC": 5985, "lkTong": 48195.6, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2021-05", "ky": "T5/2021", "ngay": "31/05/2021", "rl": 28410, "sodotRL": 46, "cc": 500, "sodotCC": 1, "tong": 28910, "mom": -2, "yoy": null, "lkRL": 70620.6, "lkCC": 6485, "lkTong": 77105.6, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2021-06", "ky": "T6/2021", "ngay": "30/06/2021", "rl": 52274, "sodotRL": 91, "cc": 1500, "sodotCC": 1, "tong": 53774, "mom": 86, "yoy": null, "lkRL": 122894.6, "lkCC": 7985, "lkTong": 130879.6, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2021-07", "ky": "T7/2021", "ngay": "31/07/2021", "rl": 38905, "sodotRL": 53, "cc": 0, "sodotCC": 0, "tong": 38905, "mom": -28, "yoy": null, "lkRL": 161799.6, "lkCC": 7985, "lkTong": 169784.6, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2021-08", "ky": "T8/2021", "ngay": "31/08/2021", "rl": 24077, "sodotRL": 51, "cc": 2000, "sodotCC": 1, "tong": 26077, "mom": -33, "yoy": null, "lkRL": 185876.6, "lkCC": 9985, "lkTong": 195861.6, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2021-09", "ky": "T9/2021", "ngay": "30/09/2021", "rl": 29734, "sodotRL": 42, "cc": 0, "sodotCC": 0, "tong": 29734, "mom": 14, "yoy": null, "lkRL": 215610.6, "lkCC": 9985, "lkTong": 225595.6, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2021-10", "ky": "T10/2021", "ngay": "31/10/2021", "rl": 35319, "sodotRL": 53, "cc": 3966, "sodotCC": 4, "tong": 39285, "mom": 32, "yoy": null, "lkRL": 250929.6, "lkCC": 13951, "lkTong": 264880.6, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2021-11", "ky": "T11/2021", "ngay": "30/11/2021", "rl": 18276, "sodotRL": 40, "cc": 2090, "sodotCC": 1, "tong": 20366, "mom": -48, "yoy": null, "lkRL": 269205.6, "lkCC": 16041, "lkTong": 285246.6, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2021-12", "ky": "T12/2021", "ngay": "31/12/2021", "rl": 65757, "sodotRL": 80, "cc": 0, "sodotCC": 0, "tong": 65757, "mom": 223, "yoy": null, "lkRL": 334962.6, "lkCC": 16041, "lkTong": 351003.6, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-01", "ky": "T1/2022", "ngay": "31/01/2022", "rl": 19500, "sodotRL": 16, "cc": 5009, "sodotCC": 7, "tong": 24509, "mom": -63, "yoy": null, "lkRL": 19500, "lkCC": 5009, "lkTong": 24509, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-02", "ky": "T2/2022", "ngay": "28/02/2022", "rl": 1300, "sodotRL": 4, "cc": 500, "sodotCC": 1, "tong": 1800, "mom": -93, "yoy": null, "lkRL": 20800, "lkCC": 5509, "lkTong": 26309, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-03", "ky": "T3/2022", "ngay": "31/03/2022", "rl": 26844, "sodotRL": 10, "cc": 1491, "sodotCC": 2, "tong": 28335, "mom": 1474, "yoy": null, "lkRL": 47644, "lkCC": 7000, "lkTong": 54644, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-04", "ky": "T4/2022", "ngay": "30/04/2022", "rl": 29262, "sodotRL": 23, "cc": 0, "sodotCC": 0, "tong": 29262, "mom": 3, "yoy": null, "lkRL": 76906, "lkCC": 7000, "lkTong": 83906, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-05", "ky": "T5/2022", "ngay": "31/05/2022", "rl": 39977, "sodotRL": 34, "cc": 300, "sodotCC": 1, "tong": 40277, "mom": 38, "yoy": null, "lkRL": 116883, "lkCC": 7300, "lkTong": 124183, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-06", "ky": "T6/2022", "ngay": "30/06/2022", "rl": 43593, "sodotRL": 44, "cc": 0, "sodotCC": 0, "tong": 43593, "mom": 8, "yoy": null, "lkRL": 160476, "lkCC": 7300, "lkTong": 167776, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-07", "ky": "T7/2022", "ngay": "31/07/2022", "rl": 26195, "sodotRL": 28, "cc": 0, "sodotCC": 0, "tong": 26195, "mom": -40, "yoy": null, "lkRL": 186671, "lkCC": 7300, "lkTong": 193971, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-08", "ky": "T8/2022", "ngay": "31/08/2022", "rl": 21419, "sodotRL": 26, "cc": 1268, "sodotCC": 1, "tong": 22687, "mom": -13, "yoy": null, "lkRL": 208090, "lkCC": 8568, "lkTong": 216658, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-09", "ky": "T9/2022", "ngay": "30/09/2022", "rl": 17540, "sodotRL": 25, "cc": 335, "sodotCC": 1, "tong": 17875, "mom": -21, "yoy": null, "lkRL": 225630, "lkCC": 8903, "lkTong": 234533, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-10", "ky": "T10/2022", "ngay": "31/10/2022", "rl": 335, "sodotRL": 1, "cc": 0, "sodotCC": 0, "tong": 335, "mom": -98, "yoy": null, "lkRL": 225965, "lkCC": 8903, "lkTong": 234868, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-11", "ky": "T11/2022", "ngay": "30/11/2022", "rl": 2077, "sodotRL": 5, "cc": 0, "sodotCC": 0, "tong": 2077, "mom": null, "yoy": null, "lkRL": 228042, "lkCC": 8903, "lkTong": 236945, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2022-12", "ky": "T12/2022", "ngay": "31/12/2022", "rl": 10638, "sodotRL": 11, "cc": 10638, "sodotCC": null, "tong": 21276, "mom": 924, "yoy": null, "lkRL": 238680, "lkCC": 19541, "lkTong": 258221, "mualai": null, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-01", "ky": "T1/2023", "ngay": "31/01/2023", "rl": 110, "sodotRL": null, "cc": 21, "sodotCC": null, "tong": 131, "mom": -99, "yoy": null, "lkRL": 110, "lkCC": 21, "lkTong": 131, "mualai": 8068, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-02", "ky": "T2/2023", "ngay": "28/02/2023", "rl": 500, "sodotRL": 1, "cc": 1500, "sodotCC": 2, "tong": 2000, "mom": null, "yoy": null, "lkRL": 610, "lkCC": 1521, "lkTong": 2131, "mualai": 4782, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-03", "ky": "T3/2023", "ngay": "31/03/2023", "rl": 24425, "sodotRL": 10, "cc": 2000, "sodotCC": null, "tong": 26425, "mom": 1221, "yoy": -7, "lkRL": 25035, "lkCC": 3521, "lkTong": 28556, "mualai": 14267, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-04", "ky": "T4/2023", "ngay": "30/04/2023", "rl": 671, "sodotRL": 1, "cc": 2000, "sodotCC": 1, "tong": 2671, "mom": -90, "yoy": -91, "lkRL": 25706, "lkCC": 5521, "lkTong": 31227, "mualai": 11398, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-05", "ky": "T5/2023", "ngay": "31/05/2023", "rl": 2600, "sodotRL": 4, "cc": 0, "sodotCC": 0, "tong": 2600, "mom": -3, "yoy": -94, "lkRL": 28306, "lkCC": 5521, "lkTong": 33827, "mualai": 22789, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-06", "ky": "T6/2023", "ngay": "30/06/2023", "rl": 8170, "sodotRL": 13, "cc": 0, "sodotCC": 0, "tong": 8170, "mom": 214, "yoy": -81, "lkRL": 36476, "lkCC": 5521, "lkTong": 41997, "mualai": 31591, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-07", "ky": "T7/2023", "ngay": "31/07/2023", "rl": 33135, "sodotRL": 14, "cc": 7500, "sodotCC": 7, "tong": 40635, "mom": 397, "yoy": 55, "lkRL": 69611, "lkCC": 13021, "lkTong": 82632, "mualai": 20533, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-08", "ky": "T8/2023", "ngay": "31/08/2023", "rl": 32791, "sodotRL": 22, "cc": 1813, "sodotCC": null, "tong": 34604, "mom": -15, "yoy": 53, "lkRL": 102402, "lkCC": 14834, "lkTong": 117236, "mualai": 17489, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-09", "ky": "T9/2023", "ngay": "30/09/2023", "rl": 37509, "sodotRL": 14, "cc": 3344, "sodotCC": null, "tong": 40853, "mom": 18, "yoy": 129, "lkRL": 139911, "lkCC": 18178, "lkTong": 158089, "mualai": 9249, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-10", "ky": "T10/2023", "ngay": "31/10/2023", "rl": 28056, "sodotRL": 18, "cc": 3092, "sodotCC": null, "tong": 31148, "mom": -24, "yoy": null, "lkRL": 167967, "lkCC": 21270, "lkTong": 189237, "mualai": 13645, "socham": 16, "goccham": 1006, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-11", "ky": "T11/2023", "ngay": "30/11/2023", "rl": 35965, "sodotRL": 27, "cc": 10000, "sodotCC": null, "tong": 45965, "mom": 48, "yoy": 2113, "lkRL": 203932, "lkCC": 31270, "lkTong": 235202, "mualai": 8754, "socham": null, "goccham": null, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2023-12", "ky": "T12/2023", "ngay": "31/12/2023", "rl": 66980, "sodotRL": 55, "cc": 2813, "sodotCC": null, "tong": 69793, "mom": 52, "yoy": 228, "lkRL": 270912, "lkCC": 34083, "lkTong": 304995, "mualai": 32677, "socham": 6, "goccham": 545.7, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2024-01", "ky": "T1/2024", "ngay": "31/01/2024", "rl": 1650, "sodotRL": 2, "cc": 2650, "sodotCC": 1, "tong": 4300, "mom": -94, "yoy": null, "lkRL": 1650, "lkCC": 2650, "lkTong": 4300, "mualai": 7394, "socham": 7, "goccham": 8432.0, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2024-02", "ky": "T2/2024", "ngay": "29/02/2024", "rl": 2165, "sodotRL": 3, "cc": 0, "sodotCC": 0, "tong": 2165, "mom": -50, "yoy": 8, "lkRL": 3815, "lkCC": 2650, "lkTong": 6465, "mualai": 2056, "socham": 7, "goccham": 6213.0, "gtgd": null, "bq": null, "momtc": null, "yoytc": null, "lkgtgd": null}, {"thang": "2024-03", "ky": "T3/2024", "ngay": "31/03/2024", "rl": 10795, "sodotRL": 7, "cc": 6228, "sodotCC": 0, "tong": 17023, "mom": 686, "yoy": -36, "lkRL": 14610, "lkCC": 8878, "lkTong": 23488, "mualai": 8031, "socham": 7, "goccham": 4851.0, "gtgd": 91120, "bq": null, "momtc": 51.8, "yoytc": null, "lkgtgd": null}, {"thang": "2024-04", "ky": "T4/2024", "ngay": "30/04/2024", "rl": 19227, "sodotRL": 13, "cc": 0, "sodotCC": 0, "tong": 19227, "mom": 13, "yoy": 620, "lkRL": 33837, "lkCC": 8878, "lkTong": 42715, "mualai": 12001, "socham": 1, "goccham": 47.0, "gtgd": 68406, "bq": null, "momtc": -25.0, "yoytc": null, "lkgtgd": null}, {"thang": "2024-05", "ky": "T5/2024", "ngay": "31/05/2024", "rl": 29345, "sodotRL": 19, "cc": 500, "sodotCC": 0, "tong": 29845, "mom": 55, "yoy": 1048, "lkRL": 63182, "lkCC": 9378, "lkTong": 72560, "mualai": 9178, "socham": 10, "goccham": 8781.0, "gtgd": 97581, "bq": 4435, "momtc": 23.0, "yoytc": null, "lkgtgd": null}, {"thang": "2024-06", "ky": "T6/2024", "ngay": "30/06/2024", "rl": 73265, "sodotRL": 30, "cc": 2000, "sodotCC": 3, "tong": 75265, "mom": 152, "yoy": 821, "lkRL": 136447, "lkCC": 11378, "lkTong": 147825, "mualai": 13336, "socham": 2, "goccham": 980.0, "gtgd": 99467, "bq": 4973, "momtc": 1.93, "yoytc": null, "lkgtgd": null}, {"thang": "2024-07", "ky": "T7/2024", "ngay": "31/07/2024", "rl": 40542, "sodotRL": 33, "cc": 395, "sodotCC": 1, "tong": 40937, "mom": -46, "yoy": 1, "lkRL": 176989, "lkCC": 11773, "lkTong": 188762, "mualai": 32094, "socham": 4, "goccham": 3392.0, "gtgd": 84406, "bq": 3670, "momtc": -15.14, "yoytc": null, "lkgtgd": null}, {"thang": "2024-08", "ky": "T8/2024", "ngay": "31/08/2024", "rl": 50474, "sodotRL": 43, "cc": 11000, "sodotCC": 2, "tong": 61474, "mom": 50, "yoy": 78, "lkRL": 227463, "lkCC": 22773, "lkTong": 250236, "mualai": 11023, "socham": 11, "goccham": 1195.5, "gtgd": 72740, "bq": 3294, "momtc": -13.82, "yoytc": null, "lkgtgd": null}, {"thang": "2024-09", "ky": "T9/2024", "ngay": "30/09/2024", "rl": 54764, "sodotRL": 24, "cc": 1469, "sodotCC": 1, "tong": 56233, "mom": -9, "yoy": 38, "lkRL": 282227, "lkCC": 24242, "lkTong": 306469, "mualai": 11749, "socham": 28, "goccham": 789.8, "gtgd": 87768, "bq": 4619, "momtc": 21.11, "yoytc": null, "lkgtgd": null}, {"thang": "2024-10", "ky": "T10/2024", "ngay": "31/10/2024", "rl": 34006, "sodotRL": 21, "cc": 5059, "sodotCC": 4, "tong": 39065, "mom": -31, "yoy": 25, "lkRL": 316233, "lkCC": 29301, "lkTong": 345534, "mualai": 12772, "socham": 1, "goccham": 2658.0, "gtgd": 121223, "bq": 5271, "momtc": 38.12, "yoytc": null, "lkgtgd": null}, {"thang": "2024-11", "ky": "T11/2024", "ngay": "30/11/2024", "rl": 35423, "sodotRL": 29, "cc": 0, "sodotCC": 0, "tong": 35423, "mom": -9, "yoy": -23, "lkRL": 351656, "lkCC": 29301, "lkTong": 380957, "mualai": 6204, "socham": 7, "goccham": 151.4, "gtgd": 95357, "bq": 4541, "momtc": -21.34, "yoytc": 35.67, "lkgtgd": null}, {"thang": "2024-12", "ky": "T12/2024", "ngay": "31/12/2024", "rl": 79128, "sodotRL": 54, "cc": 800, "sodotCC": 1, "tong": 79928, "mom": 126, "yoy": 15, "lkRL": 430784, "lkCC": 30101, "lkTong": 460885, "mualai": 27458, "socham": 3, "goccham": 80.3, "gtgd": 131786, "bq": 5990, "momtc": 38.2, "yoytc": 33.83, "lkgtgd": null}, {"thang": "2025-01", "ky": "T1/2025", "ngay": "31/01/2025", "rl": 0, "sodotRL": 0, "cc": 5554, "sodotCC": 4, "tong": 5554, "mom": -93, "yoy": 29, "lkRL": 0, "lkCC": 5554, "lkTong": 5554, "mualai": 5661, "socham": 0, "goccham": 0.0, "gtgd": 80128, "bq": 4713, "momtc": -39.2, "yoytc": 7.5, "lkgtgd": 80128}, {"thang": "2025-02", "ky": "T2/2025", "ngay": "28/02/2025", "rl": 0, "sodotRL": 0, "cc": 2351, "sodotCC": 0, "tong": 2351, "mom": -58, "yoy": 9, "lkRL": 0, "lkCC": 7905, "lkTong": 7905, "mualai": 2592, "socham": 1, "goccham": 39.0, "gtgd": 73491, "bq": 3675, "momtc": -8.28, "yoytc": 44.5, "lkgtgd": 153619}, {"thang": "2025-03", "ky": "T3/2025", "ngay": "31/03/2025", "rl": 2000, "sodotRL": 1, "cc": 15199, "sodotCC": 4, "tong": 17199, "mom": 632, "yoy": 1, "lkRL": 2000, "lkCC": 23104, "lkTong": 25104, "mualai": 5430, "socham": 7, "goccham": 660.0, "gtgd": 120858, "bq": 5755, "momtc": 64.45, "yoytc": 32.6, "lkgtgd": 274477}, {"thang": "2025-04", "ky": "T4/2025", "ngay": "30/04/2025", "rl": 44011, "sodotRL": 19, "cc": 4800, "sodotCC": 2, "tong": 48811, "mom": 184, "yoy": 154, "lkRL": 46011, "lkCC": 27904, "lkTong": 73915, "mualai": 10318, "socham": 2, "goccham": 10.3, "gtgd": 100470, "bq": 5023, "momtc": -16.87, "yoytc": 46.9, "lkgtgd": 374947}, {"thang": "2025-05", "ky": "T5/2025", "ngay": "31/05/2025", "rl": 69171, "sodotRL": 42, "cc": 0, "sodotCC": 0, "tong": 69171, "mom": 42, "yoy": 132, "lkRL": 115182, "lkCC": 27904, "lkTong": 143086, "mualai": 15858, "socham": 6, "goccham": 306.0, "gtgd": 111260, "bq": 5563, "momtc": 10.74, "yoytc": 14.0, "lkgtgd": 486207}, {"thang": "2025-06", "ky": "T6/2025", "ngay": "30/06/2025", "rl": 125482, "sodotRL": 65, "cc": 0, "sodotCC": 0, "tong": 125482, "mom": 81, "yoy": 67, "lkRL": 240664, "lkCC": 27904, "lkTong": 268568, "mualai": 39265, "socham": 7, "goccham": 5224.0, "gtgd": 129040, "bq": 6145, "momtc": 15.98, "yoytc": 29.7, "lkgtgd": 615247}, {"thang": "2025-07", "ky": "T7/2025", "ngay": "31/07/2025", "rl": 31704, "sodotRL": 31, "cc": 13549, "sodotCC": 1, "tong": 45253, "mom": -64, "yoy": 11, "lkRL": 272368, "lkCC": 41453, "lkTong": 313821, "mualai": 16054, "socham": 7, "goccham": 881, "gtgd": 132027, "bq": 5740, "momtc": 2.31, "yoytc": 56.4, "lkgtgd": 747250}, {"thang": "2025-08", "ky": "T8/2025", "ngay": "30/08/2025", "rl": 54030, "sodotRL": 37, "cc": 6332, "sodotCC": 6, "tong": 60362, "mom": 33, "yoy": -4, "lkRL": 326398, "lkCC": 47785, "lkTong": 374183, "mualai": 27032, "socham": 4, "goccham": 313, "gtgd": 109288, "bq": 5204, "momtc": -17.22, "yoytc": 50.8, "lkgtgd": 856538}, {"thang": "2025-09", "ky": "T9/2025", "ngay": "30/09/2025", "rl": 50070, "sodotRL": 26, "cc": 499, "sodotCC": 1, "tong": 50569, "mom": -16, "yoy": -10, "lkRL": 376468, "lkCC": 48284, "lkTong": 424752, "mualai": 19509, "socham": 5, "goccham": 150, "gtgd": 150766, "bq": 7538, "momtc": 38.0, "yoytc": 71.8, "lkgtgd": 1007304}, {"thang": "2025-10", "ky": "T10/2025", "ngay": "31/10/2025", "rl": 64602, "sodotRL": 38, "cc": 2299, "sodotCC": 4, "tong": 66902, "mom": 32, "yoy": 71, "lkRL": 441070, "lkCC": 50583, "lkTong": 491654, "mualai": 9948, "socham": 5, "goccham": 714, "gtgd": 101755, "bq": 4424, "momtc": -32.51, "yoytc": -16.1, "lkgtgd": 1109059}, {"thang": "2025-11", "ky": "T11/2025", "ngay": "30/11/2025", "rl": 35243, "sodotRL": 24, "cc": 0, "sodotCC": 0, "tong": 35243, "mom": -47, "yoy": -4, "lkRL": 476313, "lkCC": 50583, "lkTong": 526897, "mualai": 11144, "socham": 3, "goccham": 287, "gtgd": 110470, "bq": 5524, "momtc": 8.56, "yoytc": 15.8, "lkgtgd": 1219529}, {"thang": "2025-12", "ky": "T12/2025", "ngay": "31/12/2025", "rl": 96143, "sodotRL": 62, "cc": 4771, "sodotCC": 6, "tong": 100914, "mom": 186, "yoy": 23, "lkRL": 572456, "lkCC": 55354, "lkTong": 627811, "mualai": 35820, "socham": 3, "goccham": 110, "gtgd": 176770, "bq": 7686, "momtc": 60.02, "yoytc": 34.1, "lkgtgd": 1396299}, {"thang": "2026-01", "ky": "T1/2026", "ngay": "31/01/2026", "rl": 190, "sodotRL": 1, "cc": 4811, "sodotCC": 3, "tong": 5001, "mom": -95, "yoy": -10, "lkRL": 190, "lkCC": 4811, "lkTong": 5001, "mualai": 384, "socham": 4, "goccham": 746, "gtgd": 108730, "bq": 5437, "momtc": -38.49, "yoytc": 35.7, "lkgtgd": 108730}, {"thang": "2026-02", "ky": "T2/2026", "ngay": "28/02/2026", "rl": 80, "sodotRL": 1, "cc": 3301, "sodotCC": 3, "tong": 3381, "mom": -32, "yoy": 44, "lkRL": 270, "lkCC": 8112, "lkTong": 8382, "mualai": 1749, "socham": 3, "goccham": 490, "gtgd": 63184, "bq": 4212, "momtc": -41.89, "yoytc": -14.0, "lkgtgd": 171914}, {"thang": "2026-03", "ky": "T3/2026", "ngay": "31/03/2026", "rl": 27036, "sodotRL": 3, "cc": 6111, "sodotCC": 2, "tong": 33147, "mom": 880, "yoy": 93, "lkRL": 27306, "lkCC": 14223, "lkTong": 41529, "mualai": 6298, "socham": 10, "goccham": 2205, "gtgd": 151283, "bq": 6877, "momtc": 139.43, "yoytc": 25.2, "lkgtgd": 323197}, {"thang": "2026-04", "ky": "T4/2026", "ngay": "29/04/2026", "rl": 43450, "sodotRL": 17, "cc": 2000, "sodotCC": 1, "tong": 45450, "mom": 37, "yoy": -7, "lkRL": 70756, "lkCC": 16223, "lkTong": 86979, "mualai": 16663, "socham": 4, "goccham": 120, "gtgd": 131020, "bq": 6551, "momtc": -13.41, "yoytc": 30.4, "lkgtgd": 454247}, {"thang": "2026-05", "ky": "T5/2026", "ngay": "29/05/2026", "rl": 51952, "sodotRL": 29, "cc": 4999, "sodotCC": 4, "tong": 56951, "mom": 25, "yoy": -18, "lkRL": 122708, "lkCC": 21222, "lkTong": 143930, "mualai": 19780, "socham": 2, "goccham": 125, "gtgd": 120129, "bq": 6006, "momtc": -8.31, "yoytc": 7.8, "lkgtgd": 574376}, {"thang": "2026-06", "ky": "T6/2026", "ngay": "30/06/2026", "rl": 40376, "sodotRL": 39, "cc": 3500, "sodotCC": 2, "tong": 43876, "mom": -23, "yoy": -65, "lkRL": 163084, "lkCC": 24722, "lkTong": 187806, "mualai": 58397, "socham": 2, "goccham": 3000, "gtgd": 168576, "bq": 7662, "momtc": 40.33, "yoytc": 28.7, "lkgtgd": 742952}];
+
+/* ---------- helpers ---------- */
+const SVGNS="http://www.w3.org/2000/svg";
+function el(tag,attrs){const e=document.createElementNS(SVGNS,tag);for(const k in (attrs||{}))e.setAttribute(k,attrs[k]);return e;}
+function fmt(n){if(n==null)return"—";n=Math.round(n);const s=Math.abs(n).toString();let o="";for(let i=0;i<s.length;i++){if(i>0&&(s.length-i)%3===0)o+=".";o+=s[i];}return(n<0?"-":"")+o;}
+function pct(n){if(n==null)return"—";const v=Math.round(n*10)/10;return(v>0?"+":"")+v+"%";}
+function cssv(name){return getComputedStyle(document.documentElement).getPropertyValue(name).trim();}
+function shortMonth(t){const[y,m]=t.split("-");return"T"+parseInt(m,10)+"/"+y.slice(2);}
+function niceMax(v){if(!(v>0))return 1;const p=Math.pow(10,Math.floor(Math.log10(v)));const s=v/p;let n=s<=1?1:s<=2?2:s<=2.5?2.5:s<=5?5:10;return n*p;}
+function sum(arr,key){return arr.reduce((a,d)=>a+(d[key]||0),0);}
+
+const tip=document.getElementById("tip");
+function showTip(html,evt){tip.innerHTML=html;tip.style.opacity=1;moveTip(evt);}
+function moveTip(evt){let x=evt.clientX+14,y=evt.clientY+14;const w=tip.offsetWidth,h=tip.offsetHeight;
+  if(x+w>innerWidth-8)x=evt.clientX-w-14; if(y+h>innerHeight-8)y=evt.clientY-h-14; tip.style.left=x+"px";tip.style.top=y+"px";}
+function hideTip(){tip.style.opacity=0;}
+function bindTip(node,html){node.addEventListener("mousemove",e=>showTip(html,e));node.addEventListener("mouseleave",hideTip);node.style.cursor="default";}
+
+/* ---------- filter state ---------- */
+let fromIdx=0, toIdx=DATA.length-1;   // mặc định: toàn bộ dữ liệu
+let F=DATA.slice(fromIdx,toIdx+1);
+let curTab="tong";
+
+const $=id=>document.getElementById(id);
+const YEARS=[...new Set(DATA.map(d=>d.thang.slice(0,4)))];
+function monthsOf(y){return DATA.map((d,i)=>({d,i})).filter(x=>x.d.thang.slice(0,4)===y);}
+
+function buildFilterUI(){
+  const sy=$("selYear");
+  sy.appendChild(new Option("Tất cả năm","all"));
+  YEARS.forEach(y=>sy.appendChild(new Option(y,y)));
+  sy.value="all";
+  sy.onchange=()=>{rebuildSub();applyFilter();};
+  $("selSub").onchange=applyFilter;
+  rebuildSub();
+}
+// dropdown 2: Cả năm / Quý / Tháng — chỉ liệt kê kỳ có dữ liệu; khóa khi chọn "Tất cả năm"
+function rebuildSub(){
+  const y=$("selYear").value, ss=$("selSub");
+  ss.innerHTML="";
+  if(y==="all"){ss.appendChild(new Option("Cả kỳ","all"));ss.disabled=true;return;}
+  ss.disabled=false;
+  ss.appendChild(new Option("Cả năm","all"));
+  const ms=monthsOf(y);
+  const qs=[...new Set(ms.map(x=>Math.ceil(parseInt(x.d.thang.slice(5,7),10)/3)))];
+  qs.forEach(q=>ss.appendChild(new Option("Quý "+q,"Q"+q)));
+  ms.forEach(x=>ss.appendChild(new Option("Tháng "+parseInt(x.d.thang.slice(5,7),10),x.d.thang.slice(5,7))));
+  ss.value="all";
+}
+function applyFilter(){
+  const y=$("selYear").value, s=$("selSub").value;
+  if(y==="all"){fromIdx=0;toIdx=DATA.length-1;}
+  else{
+    let sel=monthsOf(y);
+    if(s[0]==="Q"){const q=+s.slice(1);sel=sel.filter(x=>Math.ceil(parseInt(x.d.thang.slice(5,7),10)/3)===q);}
+    else if(s!=="all"){sel=sel.filter(x=>x.d.thang.slice(5,7)===s);}
+    fromIdx=sel[0].i;toIdx=sel[sel.length-1].i;
+  }
+  refresh();
+}
+function refresh(){
+  F=DATA.slice(fromIdx,toIdx+1);
+  const y=$("selYear").value, s=$("selSub")?$("selSub").value:"all";
+  const lab=y==="all"?"Toàn kỳ":s==="all"?"Năm "+y:s[0]==="Q"?"Quý "+s.slice(1)+"/"+y:"Tháng "+parseInt(s,10)+"/"+y;
+  $("pnote").textContent=F.length>1
+    ?`${lab} · ${F.length} tháng (${F[0].ky} – ${F[F.length-1].ky})`
+    :`${lab}`;
+  renderAll();
+}
+
+/* ---------- tabs ---------- */
+document.querySelectorAll(".tab").forEach(t=>{
+  t.onclick=()=>{
+    curTab=t.dataset.tab;
+    document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x===t));
+    document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active",v.id==="view-"+curTab));
+  };
+});
+
+/* ---------- chart geometry ---------- */
+const W=760,H=300,M={t:24,r:16,b:34,l:52};
+const iW=W-M.l-M.r, iH=H-M.t-M.b;
+
+function axes(svg,lo,hi,pctAxis){
+  const ticks=5;
+  for(let i=0;i<=ticks;i++){
+    const v=lo+(hi-lo)*i/ticks;
+    const y=M.t+iH-(v-lo)/(hi-lo)*iH;
+    svg.appendChild(el("line",{x1:M.l,y1:y,x2:M.l+iW,y2:y,stroke:cssv("--grid"),"stroke-width":1}));
+    const tx=el("text",{x:M.l-8,y:y+3.5,"text-anchor":"end",class:"axlab"});
+    tx.textContent=pctAxis?Math.round(v)+"%":fmt(v);
+    svg.appendChild(tx);
+  }
+}
+function xlabels(svg,data){
+  const bw=iW/data.length;
+  const step=Math.ceil(data.length/13);           // tối đa ~13 nhãn, tự thưa khi lọc rộng
+  data.forEach((d,i)=>{
+    if(i%step!==0 && i!==data.length-1)return;
+    if(i===data.length-1 && data.length>13 && (data.length-1)%step<step/2 && (data.length-1)%step!==0)return;
+    const x=M.l+bw*i+bw/2;
+    const tx=el("text",{x,y:H-14,"text-anchor":"middle",class:"axlab"});
+    tx.textContent=shortMonth(d.thang);
+    svg.appendChild(tx);
+  });
+}
+function baseline(svg){svg.appendChild(el("line",{x1:M.l,y1:M.t+iH,x2:M.l+iW,y2:M.t+iH,stroke:cssv("--axis"),"stroke-width":1}));}
+function roundTopRect(x,y,w,h,r){
+  r=Math.min(r,w/2,h); if(h<=0)return el("path",{d:""});
+  const d=`M${x},${y+h} L${x},${y+r} Q${x},${y} ${x+r},${y} L${x+w-r},${y} Q${x+w},${y} ${x+w},${y+r} L${x+w},${y+h} Z`;
+  return el("path",{d});
+}
+
+/* ---------- generic charts (đều nhận mảng data đã lọc) ---------- */
+// Cột đơn
+function barChart(id,data,getV,color,tipFn,showLabels){
+  const svg=document.getElementById(id);svg.innerHTML="";
+  const vals=data.map(getV).filter(v=>v!=null);
+  const maxV=niceMax(Math.max(1,...vals)*1.12);
+  axes(svg,0,maxV);xlabels(svg,data);baseline(svg);
+  const bw=iW/data.length, barW=Math.min(bw*0.6,40), y0=M.t+iH, sc=iH/maxV;
+  const labOK=showLabels&&data.length<=16;
+  data.forEach((d,i)=>{
+    const v=getV(d);
+    const x=M.l+bw*i+(bw-barW)/2;
+    if(v!=null&&v>0){
+      const r=roundTopRect(x,y0-v*sc,barW,v*sc,4);
+      r.setAttribute("fill",cssv(color));svg.appendChild(r);
+      if(labOK){
+        const lab=el("text",{x:x+barW/2,y:y0-v*sc-6,"text-anchor":"middle",class:"vallab"});
+        lab.textContent=fmt(v);svg.appendChild(lab);
+      }
+    }
+    const hit=el("rect",{x:M.l+bw*i,y:M.t,width:bw,height:iH,fill:"transparent"});
+    bindTip(hit,tipFn(d));svg.appendChild(hit);
+  });
+}
+// Cột chồng RL + CC
+function stackChart(id,data){
+  const svg=document.getElementById(id);svg.innerHTML="";
+  const maxV=niceMax(Math.max(1,...data.map(d=>d.tong||0))*1.12);
+  axes(svg,0,maxV);xlabels(svg,data);baseline(svg);
+  const bw=iW/data.length, barW=Math.min(bw*0.6,40), y0=M.t+iH, sc=iH/maxV;
+  const labOK=data.length<=16;
+  data.forEach((d,i)=>{
+    const x=M.l+bw*i+(bw-barW)/2;
+    const hRL=(d.rl||0)*sc, hCC=(d.cc||0)*sc;
+    if(hRL>0){
+      const rRL=roundTopRect(x,y0-hRL,barW,hRL,hCC>0?0:4);
+      if(hCC>0)rRL.setAttribute("d",`M${x},${y0} L${x},${y0-hRL} L${x+barW},${y0-hRL} L${x+barW},${y0} Z`);
+      rRL.setAttribute("fill",cssv("--s1"));svg.appendChild(rRL);
+    }
+    if(hCC>0){
+      const cc=roundTopRect(x,y0-hRL-(hRL>0?2:0)-hCC,barW,hCC,4);
+      cc.setAttribute("fill",cssv("--s2"));svg.appendChild(cc);
+    }
+    if(labOK){
+      const lab=el("text",{x:x+barW/2,y:y0-hRL-hCC-6,"text-anchor":"middle",class:"vallab"});
+      lab.textContent=fmt(d.tong);svg.appendChild(lab);
+    }
+    const hit=el("rect",{x:M.l+bw*i,y:M.t,width:bw,height:iH,fill:"transparent"});
+    bindTip(hit,`<div class="tt">${d.ky}</div>Tổng: <b>${fmt(d.tong)}</b> tỷ<br>Riêng lẻ: ${fmt(d.rl)} tỷ (${d.sodotRL||0} đợt)<br>Công chúng: ${fmt(d.cc)} tỷ (${d.sodotCC||0} đợt)<br>MoM ${pct(d.mom)} · YoY ${pct(d.yoy)}`);
+    svg.appendChild(hit);
+  });
+}
+// Cột chồng 100% (cơ cấu)
+function shareChart(id,data){
+  const svg=document.getElementById(id);svg.innerHTML="";
+  axes(svg,0,100,true);xlabels(svg,data);baseline(svg);
+  const bw=iW/data.length, barW=Math.min(bw*0.6,40), y0=M.t+iH, sc=iH/100;
+  data.forEach((d,i)=>{
+    const x=M.l+bw*i+(bw-barW)/2;
+    const tong=d.tong||0;
+    const pRL=tong>0?(d.rl||0)/tong*100:0, pCC=tong>0?(d.cc||0)/tong*100:0;
+    if(pRL>0){
+      const r=el("rect",{x,y:y0-pRL*sc,width:barW,height:pRL*sc,fill:cssv("--s1")});
+      svg.appendChild(r);
+    }
+    if(pCC>0){
+      const r=el("rect",{x,y:y0-(pRL+pCC)*sc,width:barW,height:pCC*sc,fill:cssv("--s2")});
+      svg.appendChild(r);
+    }
+    const hit=el("rect",{x:M.l+bw*i,y:M.t,width:bw,height:iH,fill:"transparent"});
+    bindTip(hit,`<div class="tt">${d.ky}</div>Riêng lẻ: <b>${Math.round(pRL)}%</b> (${fmt(d.rl)} tỷ)<br>Công chúng: <b>${Math.round(pCC)}%</b> (${fmt(d.cc)} tỷ)`);
+    svg.appendChild(hit);
+  });
+}
+// Đường lũy kế (reset theo năm)
+function cumChart(id,data,getV,tipFn){
+  const svg=document.getElementById(id);svg.innerHTML="";
+  const vals=data.map(getV).filter(v=>v!=null);
+  const maxV=niceMax(Math.max(1,...vals)*1.08);
+  axes(svg,0,maxV);xlabels(svg,data);baseline(svg);
+  const bw=iW/data.length, y0=M.t+iH, sc=iH/maxV;
+  const pts=data.map((d,i)=>[M.l+bw*i+bw/2, y0-(getV(d)||0)*sc]);
+  for(let i=1;i<data.length;i++){
+    if(data[i].thang.slice(0,4)!==data[i-1].thang.slice(0,4)){
+      const x=M.l+bw*i;
+      svg.appendChild(el("line",{x1:x,y1:M.t,x2:x,y2:y0,stroke:cssv("--axis"),"stroke-width":1,"stroke-dasharray":"3 3"}));
+      const tx=el("text",{x:x+4,y:M.t+11,class:"axlab"});tx.textContent=data[i].thang.slice(0,4);svg.appendChild(tx);
+    }
+  }
+  let seg=[[pts[0]]];
+  for(let i=1;i<pts.length;i++){
+    if(data[i].thang.slice(0,4)!==data[i-1].thang.slice(0,4))seg.push([]);
+    seg[seg.length-1].push(pts[i]);
+  }
+  seg.forEach(s=>{
+    if(s.length>1){
+      const area=`M${s[0][0]},${y0} `+s.map(p=>`L${p[0]},${p[1]}`).join(" ")+` L${s[s.length-1][0]},${y0} Z`;
+      svg.appendChild(el("path",{d:area,fill:cssv("--s1"),opacity:0.10}));
+    }
+    svg.appendChild(el("polyline",{points:s.map(p=>p.join(",")).join(" "),fill:"none",
+      stroke:cssv("--s1"),"stroke-width":2,"stroke-linejoin":"round","stroke-linecap":"round"}));
+  });
+  data.forEach((d,i)=>{
+    const p=pts[i];
+    svg.appendChild(el("circle",{cx:p[0],cy:p[1],r:3.2,fill:cssv("--surface"),stroke:cssv("--s1"),"stroke-width":2}));
+    const hit=el("circle",{cx:p[0],cy:p[1],r:13,fill:"transparent"});
+    bindTip(hit,tipFn(d));svg.appendChild(hit);
+  });
+}
+// Cột +/- (diverging %)
+function divChart(id,data,getV,tipFn){
+  const svg=document.getElementById(id);svg.innerHTML="";
+  const vals=data.map(getV).filter(v=>v!=null);
+  const maxA=niceMax(Math.max(10,...vals.map(Math.abs))*1.1);
+  const lo=-maxA,hi=maxA,ticks=4;
+  for(let i=0;i<=ticks;i++){
+    const v=lo+(hi-lo)*i/ticks, y=M.t+iH-(v-lo)/(hi-lo)*iH;
+    svg.appendChild(el("line",{x1:M.l,y1:y,x2:M.l+iW,y2:y,stroke:cssv("--grid"),"stroke-width":1}));
+    const tx=el("text",{x:M.l-8,y:y+3.5,"text-anchor":"end",class:"axlab"});tx.textContent=Math.round(v)+"%";svg.appendChild(tx);
+  }
+  xlabels(svg,data);
+  const zeroY=M.t+iH-(0-lo)/(hi-lo)*iH;
+  svg.appendChild(el("line",{x1:M.l,y1:zeroY,x2:M.l+iW,y2:zeroY,stroke:cssv("--axis"),"stroke-width":1.4}));
+  const bw=iW/data.length, barW=Math.min(bw*0.6,40), sc=iH/(hi-lo);
+  const labOK=data.length<=16;
+  data.forEach((d,i)=>{
+    const v=getV(d);
+    const x=M.l+bw*i+(bw-barW)/2;
+    if(v!=null){
+      const h=Math.abs(v)*sc, up=v>=0, y=up?zeroY-h:zeroY;
+      let r;
+      if(up){r=roundTopRect(x,y,barW,h,4);}
+      else{r=el("path",{d:`M${x},${y} L${x},${y+h-4} Q${x},${y+h} ${x+4},${y+h} L${x+barW-4},${y+h} Q${x+barW},${y+h} ${x+barW},${y+h-4} L${x+barW},${y} Z`});}
+      r.setAttribute("fill",up?cssv("--pos"):cssv("--neg"));svg.appendChild(r);
+      if(labOK){
+        const lab=el("text",{x:x+barW/2,y:up?y-5:y+h+13,"text-anchor":"middle",class:"vallab"});
+        lab.textContent=pct(v);svg.appendChild(lab);
+      }
+    }else if(labOK){
+      const lab=el("text",{x:x+barW/2,y:zeroY-5,"text-anchor":"middle",class:"axlab"});
+      lab.textContent="—";svg.appendChild(lab);
+    }
+    const hit=el("rect",{x:M.l+bw*i,y:M.t,width:bw,height:iH,fill:"transparent"});
+    bindTip(hit,tipFn(d));svg.appendChild(hit);
+  });
+}
+
+/* ---------- KPI ---------- */
+function kpiHTML(cards){
+  return cards.map(c=>
+    `<div class="kpi"><div class="lab">${c.lab}</div>
+     <div class="val">${c.raw!==undefined?c.raw:fmt(c.val)}<span class="unit">${c.unit||""}</span></div>
+     <div class="meta">${c.meta||""}</div></div>`).join("");
+}
+function deltaSpan(v,suffix){
+  if(v==null)return`<span>— ${suffix}</span>`;
+  return`<span class="delta ${v>=0?'up':'down'}">${pct(v)} ${suffix}</span>`;
+}
+function renderKPIs(){
+  const d=F[F.length-1];
+  const sT=sum(F,"tong"), sRL=sum(F,"rl"), sCC=sum(F,"cc");
+  const pRL=sT>0?Math.round(sRL/sT*100):0, pCC=sT>0?Math.round(sCC/sT*100):0;
+  // --- Tổng hợp: số chung Tổng / Riêng lẻ / Niêm yết ---
+  document.getElementById("kpi-tong").innerHTML=kpiHTML([
+    {lab:"Tổng phát hành "+d.ky,val:d.tong,unit:"tỷ",
+      meta:deltaSpan(d.mom,"MoM")+deltaSpan(d.yoy,"YoY")},
+    {lab:"Riêng lẻ "+d.ky,val:d.rl,unit:"tỷ",
+      meta:`<span>${d.sodotRL!=null?d.sodotRL+" đợt":"—"}</span><span>${d.tong>0?Math.round((d.rl||0)/d.tong*100)+"% tổng":""}</span>`},
+    {lab:"Công chúng (niêm yết) "+d.ky,val:d.cc,unit:"tỷ",
+      meta:`<span>${d.sodotCC!=null?d.sodotCC+" đợt":"—"}</span><span>${d.tong>0?Math.round((d.cc||0)/d.tong*100)+"% tổng":""}</span>`},
+    {lab:"Tổng kỳ lọc ("+F.length+" tháng)",val:sT,unit:"tỷ",
+      meta:`<span>RL ${fmt(sRL)} (${pRL}%) · CC ${fmt(sCC)} (${pCC}%)</span>`},
+  ]);
+  // --- Riêng lẻ: giá trị, số lượng, mua lại, chậm trả ---
+  const sML=sum(F,"mualai"), sCham=sum(F,"socham"), sGoc=sum(F,"goccham");
+  const dCham=[...F].reverse().find(x=>x.socham!=null);
+  document.getElementById("kpi-rl").innerHTML=kpiHTML([
+    {lab:"Phát hành riêng lẻ "+d.ky,val:d.rl,unit:"tỷ",
+      meta:`<span>${d.sodotRL!=null?d.sodotRL+" đợt":"—"}</span>`+deltaSpan(d.mom,"MoM")},
+    {lab:"Kỳ lọc: giá trị & số đợt",val:sRL,unit:"tỷ",
+      meta:`<span>${fmt(sum(F,"sodotRL"))} đợt</span><span>${pRL}% tổng PH</span>`},
+    {lab:"Mua lại trước hạn "+d.ky,val:d.mualai,unit:"tỷ",
+      meta:`<span>Kỳ lọc ${fmt(sML)} tỷ</span>`},
+    {lab:"Chậm trả gốc/lãi (kỳ lọc)",val:sGoc,unit:"tỷ gốc",
+      meta:`<span>${fmt(sCham)} mã</span><span>${dCham?"Gần nhất "+dCham.ky+": "+fmt(dCham.socham)+" mã / "+fmt(dCham.goccham)+" tỷ":"Chưa có dữ liệu"}</span>`},
+  ]);
+  // --- Công chúng ---
+  document.getElementById("kpi-cc").innerHTML=kpiHTML([
+    {lab:"Phát hành công chúng "+d.ky,val:d.cc,unit:"tỷ",
+      meta:`<span>${d.sodotCC!=null?d.sodotCC+" đợt":"—"}</span>`},
+    {lab:"Kỳ lọc: giá trị & số đợt",val:sCC,unit:"tỷ",
+      meta:`<span>${fmt(sum(F,"sodotCC"))} đợt</span>`},
+    {lab:"Tỷ trọng CC kỳ lọc",raw:pCC+"%",
+      meta:`<span>trên tổng PH ${fmt(sT)} tỷ</span>`},
+    {lab:"Lũy kế CC YTD",val:d.lkCC,unit:"tỷ",
+      meta:`<span>RL YTD ${fmt(d.lkRL)} tỷ</span>`},
+  ]);
+}
+
+/* ---------- tables ---------- */
+// Trạng thái bảng: desc = mới nhất trước (mặc định), open = hiện toàn bộ
+const TSTATE={tong:{desc:true,open:false},rl:{desc:true,open:false},cc:{desc:true,open:false}};
+const TBL_LIMIT=12;
+// cols: [label, key, kiểu]  kiểu: "p"=%, hoặc hàm tự tính
+function renderTable(tab,cols,totalKeys){
+  const st=TSTATE[tab], id=TBLS[tab].el;
+  let rows=st.desc?[...F].reverse():[...F];
+  const total=rows.length, cut=!st.open&&total>TBL_LIMIT;
+  if(cut)rows=rows.slice(0,TBL_LIMIT);
+  let h="<thead><tr>"+cols.map(c=>`<th>${c[0]}</th>`).join("")+"</tr></thead><tbody>";
+  rows.forEach(d=>{
+    h+="<tr>"+cols.map(c=>{
+      if(typeof c[1]==="function")return`<td>${c[1](d)}</td>`;
+      if(c[1]==="ky")return`<td>${d.ky}</td>`;
+      const v=d[c[1]];
+      if(c[2]==="p")return`<td class="${v==null?'':(v<0?'num-neg':'num-pos')}">${pct(v)}</td>`;
+      return`<td>${fmt(v)}</td>`;
+    }).join("")+"</tr>";
+  });
+  if(cut)h+=`<tr class="morerow"><td colspan="${cols.length}">
+    <button class="morebtn" onclick="TSTATE['${tab}'].open=true;renderTables()">▾ Xem thêm ${total-TBL_LIMIT} tháng ${st.desc?'cũ hơn':'mới hơn'}</button></td></tr>`;
+  else if(st.open&&total>TBL_LIMIT)h+=`<tr class="morerow"><td colspan="${cols.length}">
+    <button class="morebtn" onclick="TSTATE['${tab}'].open=false;renderTables()">▴ Thu gọn (hiện ${TBL_LIMIT} tháng ${st.desc?'gần nhất':'đầu kỳ'})</button></td></tr>`;
+  h+="</tbody><tfoot><tr>"+cols.map((c,i)=>{
+    if(i===0)return`<td>Tổng kỳ lọc (${F.length}T)</td>`;
+    if(typeof c[1]==="string"&&totalKeys.includes(c[1]))return`<td>${fmt(sum(F,c[1]))}</td>`;
+    return"<td></td>";
+  }).join("")+"</tr></tfoot>";
+  document.getElementById(id).innerHTML=h;
+  // nút đảo chiều sắp xếp trên header bảng
+  const sb=document.getElementById("sort-"+tab);
+  if(sb)sb.textContent=st.desc?"↓ Mới nhất trước":"↑ Cũ nhất trước";
+}
+function toggleSort(tab){TSTATE[tab].desc=!TSTATE[tab].desc;renderTables();}
+const TBLS={
+  tong:{el:"tbl-tong",name:"TPDN_TongHop",cols:[
+    ["Tháng","ky"],["PH Riêng lẻ","rl"],["PH Công chúng","cc"],["Tổng PH","tong"],
+    ["%MoM","mom","p"],["%YoY","yoy","p"],["Lũy kế Tổng","lkTong"],["Mua lại","mualai"],
+    ["Chậm trả (mã)","socham"],["Gốc chậm trả","goccham"],["GTGD thứ cấp","gtgd"],["BQ/phiên","bq"]],
+    totals:["rl","cc","tong","mualai","socham","goccham","gtgd"]},
+  rl:{el:"tbl-rl",name:"TPDN_RiengLe",cols:[
+    ["Tháng","ky"],["PH Riêng lẻ","rl"],["Số đợt","sodotRL"],["Lũy kế RL","lkRL"],
+    ["Mua lại","mualai"],["Chậm trả (mã)","socham"],["Gốc chậm trả","goccham"],
+    ["GTGD thứ cấp","gtgd"],["BQ/phiên","bq"],["%MoM GD","momtc","p"],["%YoY GD","yoytc","p"]],
+    totals:["rl","sodotRL","mualai","socham","goccham","gtgd"]},
+  cc:{el:"tbl-cc",name:"TPDN_CongChung",cols:[
+    ["Tháng","ky"],["PH Công chúng","cc"],["Số đợt","sodotCC"],["Lũy kế CC","lkCC"],
+    ["Tỷ trọng CC/Tổng",d=>d.tong>0?Math.round((d.cc||0)/d.tong*100)+"%":"—","fn"],
+    ["Tổng PH tháng","tong"]],
+    totals:["cc","sodotCC","tong"]},
+};
+function renderTables(){
+  for(const k in TBLS)renderTable(k,TBLS[k].cols,TBLS[k].totals);
+}
+
+/* ---------- kết xuất Excel (bảng theo kỳ lọc, số thô để Excel tính được) ---------- */
+function exportXLS(tab){
+  const t=TBLS[tab];
+  const rows=TSTATE[tab].desc?[...F].reverse():[...F];  // xuất theo đúng thứ tự đang xem (đủ kỳ lọc)
+  let h="<tr>"+t.cols.map(c=>`<th>${c[0]}</th>`).join("")+"</tr>";
+  rows.forEach(d=>{
+    h+="<tr>"+t.cols.map(c=>{
+      if(typeof c[1]==="function")return`<td>${c[1](d)}</td>`;
+      if(c[1]==="ky")return`<td>${d.ky}</td>`;
+      const v=d[c[1]];
+      return`<td>${v==null?"":v}</td>`;
+    }).join("")+"</tr>";
+  });
+  h+="<tr><td>Tổng kỳ lọc</td>"+t.cols.slice(1).map(c=>
+    (typeof c[1]==="string"&&t.totals.includes(c[1]))?`<td>${Math.round(sum(F,c[1])*10)/10}</td>`:"<td></td>").join("")+"</tr>";
+  const html=`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>
+<x:Name>${t.name}</x:Name><x:WorksheetOptions/></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head>
+<body><table border="1">${h}</table>
+<p>Nguồn: Báo cáo tháng VBMA · Kỳ: ${F[0].ky} – ${F[F.length-1].ky} · Đơn vị: tỷ VND · Xuất từ dashboard TPDN</p></body></html>`;
+  const blob=new Blob(["﻿"+html],{type:"application/vnd.ms-excel;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=`${t.name}_${F[0].thang}_${F[F.length-1].thang}.xls`;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+
+/* ---------- render ---------- */
+function renderCharts(){
+  // Tổng hợp
+  stackChart("cT1",F);
+  shareChart("cT2",F);
+  cumChart("cT3",F,d=>d.lkTong,d=>`<div class="tt">${d.ky}</div>Lũy kế: <b>${fmt(d.lkTong)}</b> tỷ<br>RL ${fmt(d.lkRL)} · CC ${fmt(d.lkCC)} tỷ`);
+  divChart("cT4",F,d=>d.yoy,d=>`<div class="tt">${d.ky}</div>%YoY Tổng: <b>${pct(d.yoy)}</b><br>Phát hành ${fmt(d.tong)} tỷ`);
+  // Riêng lẻ
+  barChart("cR1",F,d=>d.rl,"--s1",d=>`<div class="tt">${d.ky}</div>PH riêng lẻ: <b>${fmt(d.rl)}</b> tỷ<br>${d.sodotRL!=null?d.sodotRL+" đợt":"— đợt"} · Lũy kế ${fmt(d.lkRL)} tỷ`,true);
+  barChart("cR5",F,d=>d.sodotRL,"--s1",d=>`<div class="tt">${d.ky}</div>Số đợt RL: <b>${fmt(d.sodotRL)}</b><br>Giá trị ${fmt(d.rl)} tỷ`,true);
+  barChart("cR2",F,d=>d.mualai,"--s3",d=>`<div class="tt">${d.ky}</div>Mua lại trước hạn: <b>${fmt(d.mualai)}</b> tỷ`,true);
+  barChart("cR6",F,d=>d.goccham,"--neg",d=>`<div class="tt">${d.ky}</div>Gốc chậm trả: <b>${fmt(d.goccham)}</b> tỷ<br>Số mã chậm trả: <b>${fmt(d.socham)}</b>`,true);
+  barChart("cR3",F,d=>d.gtgd,"--s1",d=>`<div class="tt">${d.ky}</div>GTGD: <b>${fmt(d.gtgd)}</b> tỷ<br>BQ/phiên: ${fmt(d.bq)} tỷ<br>MoM ${pct(d.momtc)} · YoY ${pct(d.yoytc)}`,false);
+  cumChart("cR4",F,d=>d.lkRL,d=>`<div class="tt">${d.ky}</div>Lũy kế RL: <b>${fmt(d.lkRL)}</b> tỷ`);
+  // Công chúng
+  barChart("cC1",F,d=>d.cc,"--s2",d=>`<div class="tt">${d.ky}</div>PH công chúng: <b>${fmt(d.cc)}</b> tỷ<br>${d.sodotCC||0} đợt`,true);
+  barChart("cC2",F,d=>d.sodotCC,"--s2",d=>`<div class="tt">${d.ky}</div>Số đợt CC: <b>${d.sodotCC||0}</b><br>Giá trị ${fmt(d.cc)} tỷ`,true);
+  cumChart("cC3",F,d=>d.lkCC,d=>`<div class="tt">${d.ky}</div>Lũy kế CC: <b>${fmt(d.lkCC)}</b> tỷ`);
+  divChart("cC4",F,d=>d.tong>0?Math.round((d.cc||0)/d.tong*1000)/10:null,
+    d=>`<div class="tt">${d.ky}</div>Tỷ trọng CC: <b>${d.tong>0?Math.round((d.cc||0)/d.tong*100)+"%":"—"}</b><br>CC ${fmt(d.cc)} / Tổng ${fmt(d.tong)} tỷ`);
+}
+function renderAll(){renderKPIs();renderCharts();renderTables();}
+
+buildFilterUI();
+refresh();
+
+/* theme toggle */
+document.getElementById("themeBtn").onclick=()=>{
+  const cur=document.documentElement.getAttribute("data-theme");
+  const sysDark=matchMedia("(prefers-color-scheme: dark)").matches;
+  const now=cur?cur:(sysDark?"dark":"light");
+  document.documentElement.setAttribute("data-theme", now==="dark"?"light":"dark");
+  renderAll();
+};
+document.getElementById("printBtn").onclick=()=>window.print();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{if(!document.documentElement.getAttribute("data-theme"))renderAll();});
+addEventListener("resize",()=>{clearTimeout(window.__rz);window.__rz=setTimeout(renderAll,180);});
+</script>
+</body>
+</html>

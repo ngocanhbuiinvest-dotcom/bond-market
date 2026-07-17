@@ -11,8 +11,7 @@ __pycache__/
 *.py[cod]
 _scratch/
 
-# === Sub-project riêng (có CLAUDE.md + dashboard riêng, ngoài phạm vi pipeline HNX) ===
-VBMA/
+# (17/07/2026: VBMA/ trước đây ignore vì là sub-project riêng — user chốt đưa lên repo luôn)
 
 # === OS / editor ===
 .DS_Store
