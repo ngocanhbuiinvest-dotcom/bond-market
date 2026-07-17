@@ -23,6 +23,14 @@
     background:linear-gradient(135deg,#3d6ea5,#2f9c7f);box-shadow:0 8px 22px #0007}
   .tab small{display:block;font-weight:500;font-size:11.5px;color:var(--muted);margin-top:3px}
   .tab.active small{color:#e0eef7}
+  /* sub-tab TRONG một tab (tab "Chậm trả & gia hạn"): kiểu underline để phân cấp với tab chính */
+  .subtabs{display:flex;gap:6px;margin:0 0 18px;border-bottom:1px solid var(--line)}
+  .subtab{padding:9px 16px;cursor:pointer;color:var(--muted);font-size:14px;font-weight:600;
+    border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;transition:color .15s}
+  .subtab:hover{color:#cfe2f3}
+  .subtab.active{color:#fff;border-bottom-color:#ef7d33}
+  .subtab .sb{color:var(--muted);font-weight:400;font-size:12px;margin-left:7px}
+  .subtab.active .sb{color:#9fb4c8}
   .mini{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;
     padding:5px 12px;font-size:12px;cursor:pointer;font-weight:600}
   .mini:hover{border-color:var(--ok);color:var(--ok)}
@@ -315,6 +323,11 @@
 
 <!-- ===================== TAB CHẬM TRẢ GỐC/LÃI ===================== -->
 <section id="panel-late" class="hide">
+  <div class="subtabs">
+    <div class="subtab active" data-sub="cham">Chậm trả gốc/lãi<span class="sb" id="sb_cham"></span></div>
+    <div class="subtab" data-sub="gh">Gia hạn / đổi điều khoản<span class="sb" id="sb_gh"></span></div>
+  </div>
+  <div id="late_block">
   <div class="filterbar">
     <div class="fld"><label>Năm công bố</label><select id="fl_year"></select></div>
     <div class="fld"><label>Nhóm TCPH</label><select id="fl_group"></select></div>
@@ -346,14 +359,10 @@
         <button class="mini" id="td_csv">⭳ Xuất CSV</button></div>
       <div class="scroll"><table><thead><tr id="td_head"></tr></thead><tbody id="td_body"></tbody></table></div></div>
   </div>
-  <!-- ---------- PHẦN 2: GIA HẠN (gộp chung tab vì gia hạn là DẤU HIỆU SỚM của chậm trả) ---------- -->
-  <div id="gh_block">
-  <div style="margin:30px 0 16px;padding-top:22px;border-top:2px solid #2b3a4d">
-    <h2 style="margin:0 0 6px;font-size:19px;color:#f2b84b">Gia hạn / đổi điều khoản — dấu hiệu sớm</h2>
-    <div style="color:var(--muted);font-size:13px">
-      Gia hạn = tái cấu trúc nợ, thường xuất hiện <b>TRƯỚC</b> khi chuyển thành chậm trả ở phần trên.
-    </div>
-  </div>
+  </div><!-- /late_block -->
+
+  <!-- ---------- SUB-TAB 2: GIA HẠN (cùng tab vì là DẤU HIỆU SỚM của chậm trả) ---------- -->
+  <div id="gh_block" class="hide">
 
   <div class="filterbar">
     <div class="fld"><label>Năm công bố</label><select id="fg_year"></select></div>
@@ -1246,7 +1255,8 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
   const dnoOf=code=>Object.prototype.hasOwnProperty.call(DNO,code)?DNO[code]:null;
   // dư nợ tổng của 1 CBTT = cộng dư nợ các mã trong đó (bỏ mã không khớp)
   const dnoRow=r=>{let s=null;String(r.ma||'').split(',').map(x=>x.trim()).filter(Boolean).forEach(c=>{const d=dnoOf(c);if(d!=null)s=(s||0)+d;});return s;};
-  document.getElementById('tt_late').textContent=fmt(L.kpi.n_events)+' lượt';
+  document.getElementById('tt_late').textContent=fmt(L.kpi.n_events)+' lượt chậm trả';
+  document.getElementById('sb_cham').textContent=fmt(L.kpi.n_events)+' lượt';
   const years=[...new Set(LR.map(r=>parseDMY(r.d).getFullYear()))].filter(y=>y>1990).sort((a,b)=>b-a);
   fillSel(document.getElementById('fl_year'),years);
   fillSel(document.getElementById('fl_group'),GROUPS);
@@ -1333,12 +1343,18 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
    rows = cấp MÃ (bảng) · ev = cấp LƯỢT CBTT (biểu đồ thời gian). */
 (function(){
   const G=DATA.giahan;
-  // Đã GỘP vào tab "Chậm trả & gia hạn" -> thiếu dữ liệu thì ẩn RIÊNG phần gia hạn, không đụng tab.
-  if(!G||!G.rows||!G.rows.length){document.getElementById('gh_block')?.classList.add('hide');return;}
+  // Đã GỘP vào tab "Chậm trả & gia hạn" (2 sub-tab) -> thiếu dữ liệu thì ẩn SUB-TAB + block gia hạn,
+  // KHÔNG đụng tab chính (tab vẫn còn phần chậm trả).
+  if(!G||!G.rows||!G.rows.length){
+    document.getElementById('gh_block')?.classList.add('hide');
+    document.querySelector('.subtab[data-sub="gh"]')?.remove();
+    return;}
   const GR=G.rows,EV=G.ev||[];
-  // badge tab dùng chung: "<lượt chậm trả> · <mã gia hạn>"
+  // badge: tab chính gộp cả hai; sub-tab gia hạn có số riêng
   const _tt=document.getElementById('tt_late');
   if(_tt)_tt.textContent=(_tt.textContent?_tt.textContent+' · ':'')+fmt(G.kpi.n_ma)+' mã gia hạn';
+  const _sb=document.getElementById('sb_gh');
+  if(_sb)_sb.textContent=fmt(G.kpi.n_ma)+' mã';
   const years=[...new Set(GR.map(r=>{const d=parseDMY(r.d);return isNaN(d)?null:d.getFullYear();}).filter(Boolean))].sort((a,b)=>b-a);
   fillSel(document.getElementById('fg_year'),years);
   fillSel(document.getElementById('fg_group'),GROUPS);
@@ -1455,6 +1471,16 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
 })();
 
 // ---- tab switching ----
+/* Sub-tab trong tab "Chậm trả & gia hạn": chậm trả (hậu quả) <-> gia hạn (dấu hiệu sớm).
+   Tách 2 sub-tab thay vì xếp chồng dọc — nội dung mỗi phần dài, gộp dọc gây rối. */
+document.querySelectorAll('.subtab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.subtab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  const k=t.dataset.sub;
+  document.getElementById('late_block').classList.toggle('hide',k!=='cham');
+  document.getElementById('gh_block').classList.toggle('hide',k!=='gh');
+});
+
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   t.classList.add('active');

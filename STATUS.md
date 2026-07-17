@@ -610,3 +610,36 @@ Thay đổi kỹ thuật (nếu sau này sửa tiếp, nhớ các điểm này):
 VERIFY trên dashboard thật: 8 tab · 0 lỗi JS · cùng 1 panel có ĐỦ 2 bảng (`#td_body` 842 dòng chậm trả,
 `#gd_body` 620 dòng gia hạn) · **lọc chéo độc lập** (lọc chậm trả "Bất động sản" -> 842->686, gia hạn
 giữ nguyên 620; lọc gia hạn "kèm chậm trả" -> 620->25, chậm trả giữ nguyên 842) · reset về đúng số cũ.
+
+
+## SUB-TAB TRONG TAB "CHẬM TRẢ & GIA HẠN" (user chốt 17/07/2026 v9)
+
+User: *"tạo 2 sub trong tab này thay vì hiển thị dài cho cả 2 nội dung -> hơi rối"*.
+v8 xếp CHỒNG DỌC 2 phần (mỗi phần đều có filterbar + 6 KPI + 3 biểu đồ + bảng ~600 dòng) -> panel quá dài.
+=> Tách **2 SUB-TAB**, mỗi lúc chỉ hiện 1 phần:
+
+```
+Tab chính (pill)  : Chậm trả & gia hạn   [411 lượt chậm trả · 620 mã gia hạn]
+  └ Sub-tab 1 (underline, mặc định): Chậm trả gốc/lãi          [411 lượt]  -> #late_block
+  └ Sub-tab 2                      : Gia hạn / đổi điều khoản  [620 mã]    -> #gh_block
+```
+
+**Phân cấp thị giác có chủ đích**: tab chính = **pill** (bo góc 12px, nền), sub-tab = **underline**
+(bo góc 0, gạch chân cam #ef7d33 khi active) -> nhìn là biết cấp nào, không nhầm với thanh tab chính.
+Sub-tab bar đặt TRÊN filterbar của từng phần.
+
+Kỹ thuật:
+- CSS `.subtabs` / `.subtab` / `.subtab.active` / `.subtab .sb` (badge nhỏ trong sub-tab).
+- DOM: `#late_block` (chậm trả) + `#gh_block` (gia hạn) trong CÙNG `#panel-late`; divider/tiêu đề
+  "PHẦN 2" của v8 đã BỎ (sub-tab đã tách rồi, không cần kẻ ngang).
+- Handler `.subtab` đặt cạnh handler `.tab` chính, chỉ toggle class `hide` giữa 2 block.
+- Badge: `#tt_late` (tab chính, gộp cả hai) · `#sb_cham` · `#sb_gh` (số riêng mỗi sub-tab).
+- Không có dữ liệu gia hạn -> ẩn `#gh_block` **và `.remove()` luôn sub-tab gia hạn** (không còn tab riêng
+  để ẩn; tab chính vẫn phải sống vì còn phần chậm trả).
+- Biểu đồ là **SVG có viewBox** -> render lúc đang ẩn vẫn đúng, KHÔNG cần re-render khi đổi sub-tab
+  (đã verify: bấm sang gia hạn thì `#cg_time` có svg, bảng 600 dòng).
+
+VERIFY trên dashboard thật: 0 lỗi JS · mặc định active = "cham" (`late_block` hiện, `gh_block` ẩn) ·
+bấm sub-tab gia hạn -> đảo đúng, bảng + biểu đồ render · bấm về -> đúng · computed CSS: active có
+gạch chân `rgb(239,125,51) 2px` + chữ trắng, inactive trong suốt + chữ xám; tab chính radius 12px vs
+sub-tab 0px.
