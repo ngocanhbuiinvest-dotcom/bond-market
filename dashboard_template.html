@@ -369,6 +369,9 @@
   Dữ liệu từ Chuyên trang TPDN của HNX (NĐ 153/2020, 65/2022). Giá trị = khối lượng × mệnh giá.
   Tab <b>Phát hành</b>/<b>Mua lại</b>: toàn bộ đợt công bố. Tab <b>Đang lưu hành</b> tính trên universe đợt phát hành:
   Dư nợ = Phát hành − Mua lại trước hạn − Đáo hạn. Số liệu tham khảo, cần đối chiếu bản công bố gốc.
+  <br><b>Đối chiếu VSD</b> (bảng chi tiết tab Đang lưu hành): <b>HNX là cơ sở</b>, VSD (vsd.vn/vi/ibl) chỉ là lớp đối chiếu —
+  không mã nào của VSD được thêm vào dư nợ. Chênh giữa 2 nguồn phần lớn là <b>độ trễ vòng đời</b>
+  (CBTT HNX → lưu ký VSD → ĐKGD HNX, ~15–16 ngày/khâu; khi hủy thì HNX trước, VSD sau) chứ không phải sai số.
 </div>
 <div class="tip" id="tip"></div>
 
@@ -744,6 +747,23 @@ const groupPill=n=>`<span class="pill" style="border-color:${gColor[n]||'#2b3a4d
 // Nguồn phân ngành: VietCap ICB (niêm yết) · Override (gán tay) · Từ khóa · Khác
 const SRC_COLOR={'VietCap ICB':'#5fd0d8','Override':'#a58bff','Từ khóa':'#8fa3ba','Khác':'#ffb257'};
 const srcPill=s=>s?`<span class="pill" style="border-color:${SRC_COLOR[s]||'#2b3a4d'};color:${SRC_COLOR[s]||'#8fa3ba'}">${s}</span>`:'–';
+// ---- Đối chiếu VSD (HNX là cơ sở, VSD phủ lên). Chênh do ĐỘ TRỄ VÒNG ĐỜI là bình thường:
+// hủy ĐKGD trên HNX trước, hủy lưu ký VSD sau (~2 tuần-1 tháng, thực tế trung vị ~232 ngày).
+const VSD_TIP={
+  'Khớp':'Dư nợ HNX khớp giá trị đăng ký lưu ký tại VSD (sai số ≤ 0,1 tỷ)',
+  'Lệch':'Hai nguồn chênh nhau — xem cột Giá trị VSD; có thể do độ trễ cập nhật hoặc lỗi dữ liệu một phía',
+  'VSD đã hủy ĐK':'VSD đã hủy lưu ký nhưng HNX còn ghi dư nợ',
+  'Không có ở VSD':'Không tìm thấy mã ở danh sách VSD (TP mới chưa kịp lưu ký, hoặc TP cũ trước thời kỳ ĐKGD)'};
+const vsdPill=s=>s==='Hiệu lực'?'<span class="pill st-ok">Hiệu lực</span>'
+  :s==='Hủy đăng ký'?'<span class="pill st-no">Hủy đăng ký</span>'
+  :'<span class="pill" style="color:var(--muted)">Không có</span>';
+const khopPill=(k,ch)=>{
+  const tip=VSD_TIP[k]||'';
+  if(k==='Khớp')return `<span class="pill st-ok" title="${tip}">Khớp</span>`;
+  if(k==='Lệch')return `<span class="pill" style="border-color:#f2b84b;color:#f2b84b" title="${tip}">Lệch ${ch>0?'+':''}${fmt(ch)} tỷ</span>`;
+  if(k==='VSD đã hủy ĐK')return `<span class="pill st-no" title="${tip}">VSD đã hủy ĐK</span>`;
+  return `<span class="pill" style="color:var(--muted)" title="${tip}">Không có ở VSD</span>`;
+};
 const kpiCards=(host,defs)=>document.getElementById(host).innerHTML=defs.map((d,i)=>
   `<div class="kpi"><div class="l">${d[0]}</div><div class="v" style="color:${d[3]||COLORS[i%6]}">${d[1]}</div><div class="u">${d[2]}</div></div>`).join('');
 const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}</option>`+opts.map(o=>typeof o==='object'?`<option value="${o.v}">${o.t}</option>`:`<option>${o}</option>`).join('');
@@ -859,7 +879,10 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
     {k:'khn',t:'Kỳ hạn',type:'str',cell:r=>r.khn||''},
     {k:'dh',t:'Ngày đáo hạn',type:'date',cell:r=>r.dh},
     {k:'klcl',t:'Còn lại (năm)',type:'num',r:1,cell:r=>r.klcl!=null?fmt1(r.klcl):'–'},
-    {k:'nguon',t:'Nguồn',type:'str',cell:r=>r.nguon==='CBTT mua lại'?'<span class="pill st-no">CBTT mua lại</span>':'<span class="pill st-ok">Phát hành</span>'},
+    {k:'nguon',t:'Nguồn HNX',type:'str',w:'110px',cell:r=>r.nguon==='CBTT mua lại'?'<span class="pill st-no">CBTT mua lại</span>':'<span class="pill st-ok">Phát hành</span>'},
+    {k:'nvsd',t:'Nguồn VSD',type:'str',w:'105px',cell:r=>vsdPill(r.nvsd)},
+    {k:'gvsd',t:'Giá trị VSD (tỷ)',type:'num',r:1,cell:r=>r.gvsd!=null?fmt(r.gvsd):'–'},
+    {k:'khop',t:'Khớp',type:'str',w:'130px',cell:r=>khopPill(r.khop,r.chvsd)},
   ],{k:'gt',d:-1});
   const S={};
   function read(){S.g=fo_group.value;S.y=fo_year.value;S.t=fo_tenor.value;S.s=(fo_q.value||'').toLowerCase();}

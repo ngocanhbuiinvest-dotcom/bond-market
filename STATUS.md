@@ -371,3 +371,51 @@ thành 237 và gán nhầm mã CBTT (SNL12101 -> VIC12510!). **LUÔN lọc `join
 ```
 python vsd_hnx_lifecycle.py     # cần vsd_bond_raw.csv (có cột ngay_gcn) + bond_catalog/issuance/latepay_raw.csv
 ```
+
+
+## LỚP ĐỐI CHIẾU VSD TRONG PIPELINE HNX — `vsd_xref.py` (17/07/2026 v3)
+
+**NGUYÊN TẮC USER CHỐT: HNX là CƠ SỞ, VSD chỉ là lớp phủ đối chiếu.**
+=> KHÔNG thêm mã VSD-only vào universe, KHÔNG đổi bất kỳ số liệu HNX nào. Tổng dư nợ vẫn **1.139,0 nghìn tỷ**
+(y hệt trước khi thêm VSD — đã verify). Mã VSD không nối được chỉ hiện "Không có ở VSD".
+
+`vsd_xref.py` = module dùng chung (kiểu `sector_map.py`), 2 hàm:
+- `load_xref()` -> dict **mã CBTT (HNX) -> {gt, tinh_trang, ma_ck, isin, hieu_luc}`; nối theo thứ tự
+  **mã CBTT VSD tự khai → ISIN qua crosswalk catalog → mã GD qua crosswalk → mã CK**. Phủ **2.331/2.332 mã**.
+  Thiếu `vsd_bond_raw.csv` -> trả `{}` -> pipeline HNX chạy bình thường, chỉ mất cột đối chiếu (an toàn).
+- `doi_chieu(ma_cbtt, gt_hnx, xref)` -> `(khop, nguon_vsd, gt_vsd_ty, chenh_ty)`; `TOL=0,1 tỷ`.
+
+Gắn vào `compute_outstanding()` (sau khi tính `trang_thai`) -> 4 cột `khop / nguon_vsd / gt_vsd / chenh_vsd`
+=> **cả Excel lẫn dashboard dùng chung một nguồn tính**, không tính 2 lần.
+
+### Bảng chi tiết giờ có (user yêu cầu: Khớp, Nguồn HNX / Nguồn VSD)
+| Cột | Ý nghĩa |
+|-----|---------|
+| **Nguồn HNX** | xuất xứ dòng TRONG dữ liệu HNX: `Phát hành` / `CBTT mua lại` (cột "Nguồn" cũ đổi tên) |
+| **Nguồn VSD** | trạng thái mã bên VSD: `Hiệu lực` / `Hủy đăng ký` / `Không có` |
+| **Giá trị VSD (tỷ)** | giá trị đăng ký lưu ký (để "Khớp" kiểm chứng được, không phải cờ trần) |
+| **Chênh HNX-VSD (tỷ)** | chỉ Excel |
+| **Khớp** | `Khớp` / `Lệch ±X tỷ` / `VSD đã hủy ĐK` / `Không có ở VSD` (pill có tooltip giải thích) |
+
+Áp ở: Excel sheet **"Chi tiết dư nợ"** (12 cột) + dashboard tab **"Đang lưu hành"** (`to_head`/`to_body`,
+helper `vsdPill`/`khopPill`/`VSD_TIP` trong template) + ghi chú nguồn ở `.foot`.
+
+### KẾT QUẢ ĐỐI CHIẾU (1.282 mã đang lưu hành, 17/07/2026)
+| Trạng thái | Số mã | % mã | Dư nợ (tỷ) | % dư nợ |
+|-----------|------:|-----:|-----------:|--------:|
+| **Khớp** | 1.127 | 87,9% | 1.053.832 | **92,5%** |
+| Không có ở VSD | 125 | 9,8% | 65.917 | 5,8% |
+| Lệch | 30 | 2,3% | 19.201 | 1,7% |
+| VSD đã hủy ĐK | **0** | 0% | 0 | 0% |
+
+**"VSD đã hủy ĐK" = 0 xác nhận lại mô hình vòng đời**: không mã nào VSD hủy trước khi HNX hết dư nợ.
+Nhóm **Lệch** 30 mã: 27 mã HNX < VSD, 3 mã HNX > VSD; lớn nhất VHACH2128005 (VSD 4.208,6 vs HNX 420,9 —
+lỗi 10× phía VSD, xem mục trên), VJCH2126004 Vietjet (HNX 4.000 vs VSD 2.000), EDICB2325001 (HNX 445,4 vs VSD 2.230).
+
+🐛 **BUG ĐÃ SỬA (verify bằng browser mới lộ)**: `build_json` dùng `x["gt_vsd"] is None` -> SAI, vì
+**pandas biến None thành NaN** khi cột lẫn số => NaN lọt sang JS, cột hiện **"0"** thay vì "–".
+Phải dùng `pd.isna()`. Bài học: kiểm tra bằng cách mở dashboard thật, không chỉ nhìn JSON.
+
+### Chạy
+`vsd_bond_scraper.py` -> `_rebuild_sec.py` (dashboard) hoặc `build_reports.py` (Excel + dashboard).
+⚠ Ổ C: đầy -> đặt `TMP`/`TEMP` sang E: trước khi chạy `build_reports.py` (xem mục Môi trường).

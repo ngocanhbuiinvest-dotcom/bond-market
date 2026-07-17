@@ -17,6 +17,7 @@ from openpyxl.utils import get_column_letter
 
 # Phân loại ngành (13 nhóm: OVERRIDES tay -> VietCap ICB -> từ khóa) - dùng chung
 from sector_map import classify, classify_with_source, order_groups, GROUP_ORDER
+from vsd_xref import load_xref, doi_chieu
 
 RAW = "bond_issuance_raw.csv"
 BBRAW = "bond_buyback_raw.csv"
@@ -539,6 +540,16 @@ def compute_outstanding(df, bb):
     m["trang_thai"] = m.apply(status, axis=1)
     m["nam_dh"] = m["dh"].dt.year
 
+    # ---- LỚP ĐỐI CHIẾU VSD (user chốt 17/07/2026: HNX là CƠ SỞ, VSD chỉ phủ lên)
+    # Không đổi bất kỳ số nào của HNX, không thêm mã VSD-only vào universe.
+    # Thiếu vsd_bond_raw.csv -> xref rỗng -> mọi mã ghi "Không có ở VSD", pipeline vẫn chạy.
+    xref = load_xref()
+    dc = [doi_chieu(ma, rem, xref) for ma, rem in zip(m["ma_tp"], m["remaining"])]
+    m["khop"] = [x[0] for x in dc]
+    m["nguon_vsd"] = [x[1] for x in dc]
+    m["gt_vsd"] = [x[2] for x in dc]
+    m["chenh_vsd"] = [x[3] for x in dc]
+
     # Universe = toàn bộ mã (phát hành ∪ mua lại) -> aggregate mua lại khớp với tab "Mua lại"
     iss_set = set(m["ma_tp"])
     bb_iss = bb[bb["ma_tp"].isin(iss_set)].copy()
@@ -608,15 +619,20 @@ def build_outstanding_sheets(wb, out):
     ws.add_chart(ch, "D2")
 
     # Sheet: Chi tiết dư nợ (cấp mã)
-    d = m[["ma_tp", "dn", "nhom", "face", "remaining", "dh", "trang_thai", "nguon"]].copy()
+    d = m[["ma_tp", "dn", "nhom", "face", "remaining", "dh", "trang_thai", "nguon",
+           "gt_vsd", "chenh_vsd", "khop", "nguon_vsd"]].copy()
     d["face"] = (d["face"] / TY).round(1)
     d["remaining"] = (d["remaining"] / TY).round(1)
     d["dh"] = d["dh"].dt.strftime("%d/%m/%Y")
     d = d.sort_values("remaining", ascending=False)
+    # "Nguồn HNX" = xuất xứ dòng trong chính dữ liệu HNX (Phát hành / CBTT mua lại);
+    # "Nguồn VSD" = trạng thái mã bên VSD; "Khớp" = kết quả đối chiếu 2 nguồn.
     d.columns = ["Mã TP", "Tổ chức phát hành", "Nhóm", "Giá trị phát hành (tỷ)",
-                 "Dư nợ đang lưu hành (tỷ)", "Ngày đáo hạn", "Trạng thái", "Nguồn"]
+                 "Dư nợ đang lưu hành (tỷ)", "Ngày đáo hạn", "Trạng thái", "Nguồn HNX",
+                 "Giá trị VSD (tỷ)", "Chênh HNX-VSD (tỷ)", "Khớp", "Nguồn VSD"]
     ws2 = wb.create_sheet("Chi tiết dư nợ")
-    write_df(ws2, d, number_cols=["Giá trị phát hành (tỷ)", "Dư nợ đang lưu hành (tỷ)"])
+    write_df(ws2, d, number_cols=["Giá trị phát hành (tỷ)", "Dư nợ đang lưu hành (tỷ)",
+                                  "Giá trị VSD (tỷ)", "Chênh HNX-VSD (tỷ)"])
 
 
 # ---------- JSON cho dashboard ----------
@@ -673,6 +689,11 @@ def build_json(df, out, bb=None, sec=None, rating=None, latepay=None):
                 "y": (int(x["dh"].year) if pd.notna(x["dh"]) else 0),
                 "klcl": (None if pd.isna(x["klcl_nam"]) else float(x["klcl_nam"])),
                 "nguon": x["nguon"],
+                # pandas biến None -> NaN khi cột lẫn số => phải dùng pd.isna, `is None` KHÔNG bắt được
+                # (NaN lọt sang JS thành NaN, cột hiện "0" thay vì "–").
+                "khop": x["khop"], "nvsd": x["nguon_vsd"],
+                "gvsd": (None if pd.isna(x["gt_vsd"]) else float(x["gt_vsd"])),
+                "chvsd": (None if pd.isna(x["chenh_vsd"]) else float(x["chenh_vsd"])),
             })
 
     # dòng cấp-đợt cho tab "Mua lại" (toàn bộ đợt mua lại công bố)
