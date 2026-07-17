@@ -77,9 +77,11 @@
   .scroll td.c-dn{max-width:230px;overflow:hidden;text-overflow:ellipsis}
   /* hàng bộ lọc dưới tiêu đề */
   tr.fr th{padding:3px 5px;background:var(--panel)}
-  tr.fr input.cf{width:100%;min-width:56px;box-sizing:border-box;background:#0d1520;
-    border:1px solid var(--line);border-radius:6px;color:#cfe2f3;padding:4px 7px;font-size:12px}
+  tr.fr input.cf,tr.fr select.cf{width:100%;min-width:56px;box-sizing:border-box;background:#0d1520;
+    border:1px solid var(--line);border-radius:6px;color:#cfe2f3;padding:4px 5px;font-size:12px}
   tr.fr input.cf::placeholder{color:#54677c}
+  tr.fr select.cf{cursor:pointer;max-width:210px}
+  tr.fr select.cf:has(option:checked:not([value=""])){border-color:#ef7d33;color:#ffcf99}
   /* chế độ phóng to bảng: card nổi toàn màn hình */
   .card.tbl-max{position:fixed;inset:14px;z-index:999;overflow:auto;
     box-shadow:0 0 0 200vmax rgba(0,0,0,.6)}
@@ -805,14 +807,44 @@ function makeTable(headId,bodyId,cntId,cols,def){
     cols.map(c=>`<th data-k="${c.k}" class="${c.r?'r':''}"${c.w?` style="width:${c.w}"`:''}>${c.t} <span class="ar"></span></th>`).join('');
   [...thead.children].forEach(th=>{if(!th.dataset.k)return;th.onclick=()=>{const k=th.dataset.k,col=cols.find(c=>c.k===k);
     if(st.k===k)st.d=-st.d;else{st.k=k;st.d=(col.type==='num'||col.type==='date')?-1:1;}draw();};});
-  // hàng bộ lọc theo cột (ngay dưới tiêu đề)
+  // Hàng bộ lọc theo cột — kiểu DROPLIST (user chốt 17/07/2026: chọn từ danh sách, không phải ô trống):
+  //   cột chữ ≤ 60 giá trị khác nhau -> <select> liệt kê đủ giá trị (kèm "Tất cả");
+  //   cột NGÀY -> droplist theo NĂM; cột SỐ -> không lọc (sort đã đủ);
+  //   cột chữ > 60 giá trị (mã TP, tên TCPH…) -> giữ ô tìm vì droplist hàng trăm mục không dùng được.
+  // Droplist DỰNG LẠI mỗi lần set() để chỉ liệt kê giá trị CÓ THẬT trong dữ liệu đang hiển thị.
   const ftr=document.createElement('tr');ftr.className='fr';
-  ftr.innerHTML='<th></th>'+cols.map(c=>`<th><input class="cf" data-fk="${c.k}" placeholder="lọc…" title="Lọc cột ${c.t}"></th>`).join('');
+  ftr.innerHTML='<th></th>'+cols.map(c=>`<th data-fk="${c.k}"></th>`).join('');
   thead.parentElement.appendChild(ftr);
-  ftr.querySelectorAll('input.cf').forEach(inp=>{
-    inp.oninput=()=>{fil[inp.dataset.fk]=inp.value.trim().toLowerCase();draw();};});
-  function fRows(){const ks=Object.keys(fil).filter(k=>fil[k]);
-    return ks.length?cur.filter(r=>ks.every(k=>String(r[k]??'').toLowerCase().includes(fil[k]))):cur;}
+  const esc=v=>String(v).replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  function buildFilters(){
+    ftr.querySelectorAll('th[data-fk]').forEach(th=>{
+      const k=th.dataset.fk,col=cols.find(c=>c.k===k);
+      const prev=fil[k]?fil[k].v:'';
+      if(col.type==='num'){th.innerHTML='';delete fil[k];return;}
+      if(col.type==='date'){
+        const ys=[...new Set(cur.map(r=>String(r[k]||'').slice(-4)).filter(x=>/^\d{4}$/.test(x)))].sort().reverse();
+        th.innerHTML=`<select class="cf" data-fk="${k}" title="Lọc ${col.t} theo năm"><option value="">Tất cả</option>`+
+          ys.map(y=>`<option value="${y}"${y===prev?' selected':''}>${y}</option>`).join('')+'</select>';
+        th.firstChild.onchange=e=>{fil[k]=e.target.value?{t:'yr',v:e.target.value}:null;draw();};
+        return;}
+      const vals=[...new Set(cur.map(r=>String(r[k]??'').trim()).filter(Boolean))];
+      if(vals.length<=60){
+        // col.fl = nhãn hiển thị cho droplist (cột lưu mã thô kiểu true/goc/cured thì hiện chữ dễ đọc)
+        const lab=v=>col.fl?String(col.fl(v)):v;
+        vals.sort((a,b)=>lab(a).localeCompare(lab(b),'vi'));
+        th.innerHTML=`<select class="cf" data-fk="${k}" title="Lọc cột ${col.t}"><option value="">Tất cả</option>`+
+          vals.map(v=>{const L=lab(v);return `<option value="${esc(v)}"${v===prev?' selected':''}>${L.length>30?esc(L.slice(0,30))+'…':esc(L)}</option>`;}).join('')+'</select>';
+        th.firstChild.onchange=e=>{fil[k]=e.target.value?{t:'eq',v:e.target.value}:null;draw();};
+      }else{
+        th.innerHTML=`<input class="cf" data-fk="${k}" placeholder="tìm… (${fmt(vals.length)} giá trị)" value="${esc(prev)}" title="Cột ${col.t} có ${fmt(vals.length)} giá trị — gõ để tìm">`;
+        th.firstChild.oninput=e=>{const v=e.target.value.trim();fil[k]=v?{t:'txt',v}:null;draw();};
+      }});}
+  function fRows(){const ks=Object.keys(fil).filter(k=>fil[k]&&fil[k].v);
+    if(!ks.length)return cur;
+    return cur.filter(r=>ks.every(k=>{const f=fil[k],raw=String(r[k]??'').trim();
+      if(f.t==='eq')return raw===f.v;
+      if(f.t==='yr')return raw.endsWith(f.v);
+      return raw.toLowerCase().includes(f.v.toLowerCase());}));}
   const tb=document.getElementById(bodyId);
   function sortRows(list){const col=cols.find(c=>c.k===st.k);
     return [...list].sort((a,b)=>{let x,y;
@@ -825,7 +857,7 @@ function makeTable(headId,bodyId,cntId,cols,def){
       cols.map(c=>{const cls=(c.r?'r ':'')+(c.k==='dn'?'c-dn':'');
         const ti=c.k==='dn'?` title="${String(r.dn??'').replace(/"/g,'&quot;')}"`:'';
         return `<td class="${cls.trim()}"${ti}>${c.cell(r)}</td>`;}).join('')+'</tr>').join('');
-    const nf=Object.keys(fil).filter(k=>fil[k]).length;
+    const nf=Object.keys(fil).filter(k=>fil[k]&&fil[k].v).length;
     document.getElementById(cntId).textContent=(nf?fmt(fr.length)+' / ':'')+fmt(cur.length)+' dòng'
       +(fr.length>600?' (hiển thị 600 đầu — xuất CSV để xem đủ)':'');
     [...thead.children].forEach(th=>{const ar=th.querySelector('.ar');if(ar)ar.textContent=(th.dataset.k===st.k)?(st.d>0?'▲':'▼'):'';});}
@@ -838,7 +870,7 @@ function makeTable(headId,bodyId,cntId,cols,def){
       xb.textContent=on?'✕ Thu nhỏ':'⛶ Phóng to';
       document.body.style.overflow=on?'hidden':'';};
     cntEl.after(xb);}
-  return {set:rows=>{cur=rows;draw();},
+  return {set:rows=>{cur=rows;buildFilters();draw();},
     exportCSV:filename=>{const head=['STT',...cols.map(c=>c.t)];
       const body=sortRows(fRows()).map((r,i)=>[i+1,...cols.map(c=>r[c.k])]);
       downloadCSV(filename,[head,...body]);}};
@@ -1368,13 +1400,13 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
     {k:'ma',t:'Mã trái phiếu',type:'str',w:'140px',cell:r=>r.ma},
     {k:'dn',t:'Tổ chức phát hành',type:'str',cell:r=>r.dn},
     {k:'nhom',t:'Nhóm',type:'str',w:'150px',cell:r=>groupPill(r.nhom)},
-    {k:'lct',t:'Loại chậm',type:'str',w:'120px',cell:r=>lctPill(r.lct)},
+    {k:'lct',t:'Loại chậm',type:'str',w:'120px',fl:v=>lctText[v]||v,cell:r=>lctPill(r.lct)},
     {k:'dno',t:'Dư nợ chậm trả (tỷ)',type:'num',r:1,w:'140px',cell:r=>dnoStr(r.dno)},
     {k:'n',t:'Số lượt CBTT',type:'num',r:1,w:'105px',cell:r=>fmt(r.n)},
     {k:'first',t:'Chậm lần đầu',type:'date',w:'115px',cell:r=>r.first},
     {k:'last',t:'CBTT gần nhất',type:'date',w:'115px',cell:r=>r.last},
     {k:'dur',t:'Thời gian chậm (năm)',type:'num',r:1,w:'135px',cell:r=>r.dur!=null?fmt1(r.dur):'–'},
-    {k:'tt',t:'Trạng thái',type:'str',w:'120px',cell:r=>r.tt==='cured'?'<span class="pill st-ok">Đã khắc phục</span>':'<span class="pill st-no">Đang chậm trả</span>'},
+    {k:'tt',t:'Trạng thái',type:'str',w:'120px',fl:v=>v==='cured'?'Đã khắc phục':'Đang chậm trả',cell:r=>r.tt==='cured'?'<span class="pill st-ok">Đã khắc phục</span>':'<span class="pill st-no">Đang chậm trả</span>'},
   ],{k:'dno',d:-1});
   const S={};
   function read(){S.y=fl_year.value;S.g=fl_group.value;S.t=fl_type.value;S.s=(fl_q.value||'').toLowerCase();}
@@ -1485,7 +1517,7 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
     {k:'sn',t:'Gia hạn thêm',type:'num',w:'92px',cell:snCell},
     {k:'hc',t:'Hạn chót pháp lý',type:'date',w:'110px',cell:hcCell},
     {k:'tt',t:'Trạng thái dư nợ',type:'str',w:'115px',cell:r=>r.tt||'–'},
-    {k:'cham',t:'Kèm chậm trả',type:'str',w:'100px',
+    {k:'cham',t:'Kèm chậm trả',type:'str',w:'100px',fl:v=>v==='true'?'CÓ':'Không',
      cell:r=>r.cham?'<span class="pill st-no" title="Mã này cũng đã CBTT chậm trả gốc/lãi">CÓ</span>':'<span class="pill" style="color:var(--muted)">–</span>'},
   ],{k:'gt',d:-1});
   window.renderGH=function(){read();const rows=flt(),ev=fltEv();

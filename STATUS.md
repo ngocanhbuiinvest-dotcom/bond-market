@@ -714,3 +714,25 @@ lọc chồng 2 cột -> AND đúng; reset đúng; ellipsis dn = 230px + tooltip
 phóng to: position fixed z999, nút đổi nhãn, thu về static ✓; chart Top đã biến mất ✓;
 "Khối lượng" = 0 lần xuất hiện trên tab Tổng hợp ✓; hàng lọc có mặt ở mọi bảng (issue 10 ô,
 out 13 ô, late+gh 22 ô) ✓.
+
+
+## BỘ LỌC BẢNG CHUYỂN SANG DROPLIST (user chốt 17/07/2026 v12)
+
+User: bộ lọc cột phải là DROPLIST liệt kê giá trị chọn được, không phải ô trống gõ tay.
+`makeTable.buildFilters()` — quy tắc theo LOẠI CỘT:
+- **Cột chữ ≤ 60 giá trị khác nhau** -> `<select>` liệt kê đủ giá trị (+"Tất cả"); lọc = so KHỚP ĐÚNG
+  giá trị thô (`t:'eq'`). Select đang lọc đổi viền cam (CSS `:has(option:checked:not([value=""]))`).
+- **Cột NGÀY** -> droplist theo NĂM (bóc 4 ký tự cuối `dd/mm/yyyy`, match `endsWith`, `t:'yr'`).
+- **Cột SỐ** -> KHÔNG có ô lọc (sort là đủ; lọc số bằng chữ vô nghĩa).
+- **Cột chữ > 60 giá trị** (mã TP, tên TCPH, kỳ hạn tự do…) -> GIỮ ô tìm gõ chữ (`t:'txt'`), placeholder
+  ghi rõ "tìm… (N giá trị)" — droplist 600+ mục không dùng được.
+- Droplist **DỰNG LẠI mỗi lần `set()`** -> chỉ liệt kê giá trị CÓ THẬT trong dữ liệu sau bộ lọc ngoài;
+  giữ lựa chọn cũ nếu còn hợp lệ. `fil[k]={t,v}`; nhiều cột = AND.
+- **`col.fl` = hàm nhãn hiển thị** cho cột lưu MÃ THÔ — nếu không có, droplist hiện true/false/goc/cured
+  rất xấu (đã dính, đã sửa): `cham` (true->CÓ), `lct` (goc->Gốc… qua lctText), `tt` bảng chậm trả
+  (cured->Đã khắc phục). **Cột mới lưu mã thô thì PHẢI khai fl.** Option value vẫn là giá trị THÔ (lọc eq).
+
+VERIFY browser (0 lỗi JS): tab Lưu hành 13 cột -> 6 droplist (nhom 13, ph 11 năm, ngd 4, dh 20 năm,
+ttdk 4, khop 3) + 2 ô tìm (ma/dn) + 5 cột số không lọc ✓; droplist Nhóm="Ngân hàng" -> 632/1.282,
+chồng năm ĐH 2045 -> 1 dòng, reset đúng ✓; nhãn thân thiện: Kèm chậm trả {CÓ=true, Không=false},
+chọn CÓ -> 25/620 ✓; Loại chậm {Gốc, Lãi, Cả gốc và lãi} ✓.
