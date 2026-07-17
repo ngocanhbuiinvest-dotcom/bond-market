@@ -88,6 +88,7 @@
   <div class="tab" data-tab="sec">Giao dịch thứ cấp<small id="tt_sec"></small></div>
   <div class="tab" data-tab="rating">Xếp hạng tín nhiệm<small id="tt_rating"></small></div>
   <div class="tab" data-tab="late">Chậm trả gốc/lãi<small id="tt_late"></small></div>
+  <div class="tab" data-tab="gh">Gia hạn / đổi điều khoản<small id="tt_gh"></small></div>
   <div class="tab" data-tab="upd">Cập nhật &amp; thay đổi<small id="tt_upd"></small></div>
 </div>
 
@@ -345,6 +346,46 @@
         <span id="td_cnt" style="margin-left:auto"></span>
         <button class="mini" id="td_csv">⭳ Xuất CSV</button></div>
       <div class="scroll"><table><thead><tr id="td_head"></tr></thead><tbody id="td_body"></tbody></table></div></div>
+  </div>
+</section>
+
+<!-- ===================== TAB GIA HẠN / ĐỔI ĐIỀU KHOẢN ===================== -->
+<section id="panel-gh" class="hide">
+  <div class="filterbar">
+    <div class="fld"><label>Năm công bố</label><select id="fg_year"></select></div>
+    <div class="fld"><label>Nhóm TCPH</label><select id="fg_group"></select></div>
+    <div class="fld"><label>Kèm chậm trả</label><select id="fg_cham"><option value="">Tất cả</option><option value="1">Có kèm chậm trả</option><option value="0">Chỉ gia hạn</option></select></div>
+    <button class="btn" id="fg_reset">Đặt lại</button>
+    <div class="badge" id="fg_info" style="margin-top:12px;margin-left:auto"></div>
+  </div>
+  <div style="background:#1b2836;border:1px solid #2b3a4d;border-radius:10px;padding:11px 15px;margin-bottom:14px;color:#9fb4c8;font-size:13px">
+    <b style="color:#f2b84b">Gia hạn = tái cấu trúc nợ</b> — tín hiệu rủi ro sớm, thường xuất hiện TRƯỚC chậm trả.
+    Nguồn: CBTT bất thường HNX (gia hạn · kéo dài kỳ hạn · thay đổi điều khoản, điều kiện · thay đổi nội dung kỳ hạn).
+    ⚠ Mã đã gia hạn có <b>ngày đáo hạn ở bảng phát hành là ngày CŨ</b>; khi VSD ghi ngày mới, dashboard dời ngày theo VSD
+    (cột <b>Ngày đáo hạn</b> có dấu ⟳) — chỉ áp dụng khi HNX có CBTT gia hạn xác nhận.
+  </div>
+  <div class="kpis" id="kg"></div>
+  <div class="grid">
+    <div class="card col12">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
+        <div><h3 class="combo-title">Số lượt CBTT gia hạn / đổi điều khoản theo thời gian</h3>
+          <div class="cs">mỗi lượt = một công bố; một mã có thể gia hạn nhiều lần</div></div>
+        <div style="display:flex;gap:10px;align-items:flex-end">
+          <div class="ctl"><label>Đơn vị thời gian</label><select id="cg_gran"><option value="month">Tháng</option><option value="quarter" selected>Quý</option><option value="year">Năm</option></select></div>
+          <div class="ctl"><label>Phân ngành</label><div id="cg_cgroup" class="ms"></div></div>
+        </div>
+      </div>
+      <div id="cg_time"></div>
+    </div>
+    <div class="card col5"><h3>Gia hạn theo nhóm ngành</h3><div class="cs">dư nợ của mã đã gia hạn (tỷ)</div><div id="cg_sector"></div></div>
+    <div class="card col7"><h3>Top TCPH theo dư nợ đã gia hạn</h3><div class="cs">tỷ VNĐ</div><div id="cg_top"></div></div>
+    <div class="card col12"><h3>Danh sách trái phiếu gia hạn / đổi điều khoản</h3>
+      <div class="cs" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input id="fg_q" placeholder="Lọc tên DN / mã TP…" style="min-width:240px">
+        <span style="color:var(--muted)">Gộp theo mã · <b>Số lần</b> = số lượt CBTT gia hạn (nhiều lần = rủi ro cao hơn) · <b>Dư nợ</b> lấy từ bảng dư nợ HNX ("–" nếu mã ngoài phạm vi) · <b>Kèm chậm trả</b> = mã này cũng đã CBTT chậm trả</span>
+        <span id="gd_cnt" style="margin-left:auto"></span>
+        <button class="mini" id="gd_csv">⭳ Xuất CSV</button></div>
+      <div class="scroll"><table><thead><tr id="gd_head"></tr></thead><tbody id="gd_body"></tbody></table></div></div>
   </div>
 </section>
 
@@ -1279,6 +1320,79 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
   td_csv.onclick=()=>TD.exportCSV('TPDN_DanhSachChamTra.csv');
 })();
 
+/* ===================== TAB GIA HẠN / ĐỔI ĐIỀU KHOẢN =====================
+   Gia hạn = tái cấu trúc nợ -> tín hiệu rủi ro sớm, thường ĐI TRƯỚC chậm trả.
+   rows = cấp MÃ (bảng) · ev = cấp LƯỢT CBTT (biểu đồ thời gian). */
+(function(){
+  const G=DATA.giahan;
+  if(!G||!G.rows||!G.rows.length){const t=document.querySelector('[data-tab="gh"]');if(t)t.style.display='none';return;}
+  const GR=G.rows,EV=G.ev||[];
+  document.getElementById('tt_gh').textContent=fmt(G.kpi.n_ma)+' mã';
+  const years=[...new Set(GR.map(r=>{const d=parseDMY(r.d);return isNaN(d)?null:d.getFullYear();}).filter(Boolean))].sort((a,b)=>b-a);
+  fillSel(document.getElementById('fg_year'),years);
+  fillSel(document.getElementById('fg_group'),GROUPS);
+  const S={};
+  function read(){S.y=fg_year.value;S.g=fg_group.value;S.c=fg_cham.value;S.q=(fg_q.value||'').toLowerCase();}
+  const yOf=r=>{const d=parseDMY(r.d);return isNaN(d)?0:d.getFullYear();};
+  function flt(){return GR.filter(r=>(!S.y||yOf(r)==S.y)&&(!S.g||r.nhom===S.g)
+    &&(!S.c||(S.c==='1'?r.cham:!r.cham))&&(!S.q||(r.dn+' '+r.ma).toLowerCase().includes(S.q)));}
+  function fltEv(){return EV.filter(r=>(!S.y||yOf(r)==S.y)&&(!S.g||r.nhom===S.g));}
+  let cgMS;
+  function drawTimeG(){let r=fltEv();const gs=cgMS?cgMS.get():[];if(gs.length)r=r.filter(x=>gs.includes(x.nhom));
+    const gran=cg_gran.value,g={};
+    r.forEach(x=>{const d=parseDMY(x.d);if(isNaN(d)||d.getFullYear()<1990)return;
+      const y=d.getFullYear(),m=d.getMonth()+1;let key,label;
+      if(gran==='year'){key=String(y);label=key;}
+      else if(gran==='quarter'){const q=Math.ceil(m/3);key=y+'-'+q;label='Q'+q+'/'+String(y).slice(2);}
+      else{key=y+'-'+pad2(m);label=key;}
+      const o=g[key]||(g[key]={v:0,label,sk:key});o.v++;});
+    const items=Object.values(g).sort((a,b)=>a.sk<b.sk?-1:1).map(o=>({label:o.label,v:o.v}));
+    barCount(document.getElementById('cg_time'),items,'#f2b84b','lượt',v=>`${fmt(v)} lượt CBTT gia hạn`);}
+  cgMS=multiSelect('cg_cgroup',GROUPS,drawTimeG);
+  const dhCell=r=>r.dh?(r.ndh!=='HNX'
+    ? `${r.dh} <span style="color:#f2b84b;cursor:help" title="Ngày đáo hạn CŨ ở bảng phát hành HNX đã qua; dời theo VSD vì có CBTT gia hạn xác nhận">⟳</span>`
+    : r.dh):'–';
+  const GD=makeTable('gd_head','gd_body','gd_cnt',[
+    {k:'ma',t:'Mã TP',type:'str',cell:r=>r.ma},
+    {k:'dn',t:'Tổ chức phát hành',type:'str',cell:r=>r.dn},
+    {k:'nhom',t:'Nhóm',type:'str',cell:r=>groupPill(r.nhom)},
+    {k:'n',t:'Số lần gia hạn',type:'num',w:'95px',cell:r=>r.n>1?`<b style="color:#f2b84b">${r.n}</b>`:r.n},
+    {k:'d',t:'Gia hạn gần nhất',type:'date',w:'110px',cell:r=>r.d},
+    {k:'gt',t:'Dư nợ (tỷ)',type:'num',r:1,cell:r=>r.gt!=null?fmt1(r.gt):'<span style="color:var(--muted)">–</span>'},
+    {k:'dh',t:'Ngày đáo hạn',type:'date',w:'115px',cell:dhCell},
+    {k:'tt',t:'Trạng thái dư nợ',type:'str',w:'120px',cell:r=>r.tt||'–'},
+    {k:'cham',t:'Kèm chậm trả',type:'str',w:'110px',
+     cell:r=>r.cham?'<span class="pill st-no" title="Mã này cũng đã CBTT chậm trả gốc/lãi">CÓ</span>':'<span class="pill" style="color:var(--muted)">–</span>'},
+  ],{k:'gt',d:-1});
+  window.renderGH=function(){read();const rows=flt(),ev=fltEv();
+    const dno=rows.reduce((a,r)=>a+(r.gt||0),0);
+    const nCham=rows.filter(r=>r.cham).length, nMulti=rows.filter(r=>r.n>1).length;
+    const nFix=rows.filter(r=>r.ndh!=='HNX').length;
+    kpiCards('kg',[
+      ['Số lượt CBTT gia hạn',fmt(ev.length),'công bố bất thường','var(--warn)'],
+      ['Số mã đã gia hạn',fmt(rows.length),fmt(nMulti)+' mã gia hạn nhiều lần'],
+      ['Số TCPH',fmt(uniq(rows,r=>r.dn)),'tổ chức phát hành'],
+      ['Dư nợ mã đã gia hạn',fmt(Math.round(dno/1000)),'nghìn tỷ VNĐ','var(--warn)'],
+      ['Kèm chậm trả',fmt(nCham),(rows.length?fmt1(nCham/rows.length*100):0)+'% số mã gia hạn','var(--warn)'],
+      ['Đã dời ĐH theo VSD',fmt(nFix),'mã được cứu khỏi dư nợ = 0'],
+    ]);
+    const info=[];if(S.y)info.push('Năm '+S.y);if(S.g)info.push(S.g);
+    if(S.c)info.push(S.c==='1'?'Có kèm chậm trả':'Chỉ gia hạn');
+    fg_info.textContent=info.length?'Đang lọc: '+info.join(' · '):'Toàn kỳ '+G.kpi.first+' – '+G.kpi.last;
+    drawTimeG();
+    const sm={};rows.forEach(r=>{sm[r.nhom]=(sm[r.nhom]||0)+(r.gt||0);});
+    hbar(document.getElementById('cg_sector'),GROUPS.filter(g=>sm[g]).map(g=>({label:g,v:Math.round(sm[g]),color:gColor[g]})).sort((a,b)=>b.v-a.v),'tỷ');
+    const dm={};rows.forEach(r=>{dm[r.dn]=(dm[r.dn]||0)+(r.gt||0);});
+    hbar(document.getElementById('cg_top'),Object.entries(dm).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]).slice(0,15)
+      .map(([dn,v],i)=>({label:dn.length>30?dn.slice(0,30)+'…':dn,full:dn,v:Math.round(v),color:COLORS[i%COLORS.length]})),'tỷ');
+    GD.set(rows);};
+  ['fg_year','fg_group','fg_cham'].forEach(id=>document.getElementById(id).onchange=renderGH);
+  cg_gran.onchange=drawTimeG;
+  fg_q.oninput=()=>{read();GD.set(flt());};
+  fg_reset.onclick=()=>{['fg_year','fg_group','fg_cham','fg_q'].forEach(id=>document.getElementById(id).value='');cgMS.clear();cg_gran.value='quarter';renderGH();};
+  gd_csv.onclick=()=>GD.exportCSV('TPDN_GiaHan.csv');
+})();
+
 /* ===================== TAB CẬP NHẬT & THAY ĐỔI ===================== */
 (function(){
   const U=DATA.updates;
@@ -1328,7 +1442,7 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.getElementById('panel-late').classList.toggle('hide',k!=='late');
   document.getElementById('panel-upd').classList.toggle('hide',k!=='upd');
 });
-if(window.renderSum)renderSum(); renderIssue(); if(window.renderBB)renderBB(); if(window.renderOut)renderOut(); if(window.renderSec)renderSec(); if(window.renderRating)renderRating(); if(window.renderLate)renderLate(); if(window.renderUpd)renderUpd();
+if(window.renderSum)renderSum(); renderIssue(); if(window.renderBB)renderBB(); if(window.renderOut)renderOut(); if(window.renderSec)renderSec(); if(window.renderRating)renderRating(); if(window.renderLate)renderLate(); if(window.renderGH)renderGH(); if(window.renderUpd)renderUpd();
 </script>
 </body>
 </html>

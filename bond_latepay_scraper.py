@@ -63,18 +63,33 @@ def strip_accent(s):
 
 
 def classify_event(title):
-    """Phân loại sự kiện chậm trả từ tiêu đề CBTT bất thường.
-       -> 'cham_tra'      : công bố chậm thanh toán gốc/lãi (sự kiện vỡ/chậm)
-          'khac_phuc'     : đã thanh toán sau thời gian bị chậm (khắc phục)
-          ''              : không phải sự kiện chậm trả."""
+    """Phân loại sự kiện từ tiêu đề CBTT bất thường.
+       -> 'cham_tra'  : công bố chậm thanh toán gốc/lãi (sự kiện vỡ/chậm)
+          'khac_phuc' : đã thanh toán sau thời gian bị chậm (khắc phục)
+          'gia_han'   : GIA HẠN / kéo dài kỳ hạn / thay đổi điều khoản-điều kiện trái phiếu
+          ''          : sự kiện khác.
+
+    Ưu tiên chậm trả TRƯỚC gia hạn: một tin vừa báo chậm vừa xin gia hạn thì bản chất là chậm trả.
+
+    ⚠ BÀI HỌC 17/07/2026 — TỪ KHÓA GIA HẠN dễ bỏ sót, PHẢI có đủ 3 biến thể (soi tin thật mới ra):
+      "gia hạn trái phiếu" · "kéo dài kỳ hạn" · "thay đổi ĐIỀU KHOẢN, ĐIỀU KIỆN" (đúng thứ tự này —
+      viết ngược 'điều kiện, điều khoản' sẽ khớp 0 tin) · "thay đổi nội dung kỳ hạn".
+    Đây là kênh phát hiện GIA HẠN: mã gia hạn có ngày đáo hạn ở bảng phát hành là ngày CŨ
+    -> nếu không bắt, dashboard ép dư nợ = 0 oan (xem STATUS.md).
+    """
     t = strip_accent(title)
     late = any(k in t for k in ["cham thanh toan", "cham tra", "khong the thanh toan",
                                 "khong thanh toan duoc"])
-    if not late:
-        return ""
-    cured = any(k in t for k in ["sau thoi gian bi cham", "sau khi cham",
-                                 "sau thoi gian cham", "sau cham thanh toan"])
-    return "khac_phuc" if cured else "cham_tra"
+    if late:
+        cured = any(k in t for k in ["sau thoi gian bi cham", "sau khi cham",
+                                     "sau thoi gian cham", "sau cham thanh toan"])
+        return "khac_phuc" if cured else "cham_tra"
+    if any(k in t for k in ["gia han", "keo dai ky han", "keo dai thoi han",
+                            "dieu khoan, dieu kien", "dieu khoan va dieu kien",
+                            "dieu kien, dieu khoan", "noi dung ky han", "thay doi ky han",
+                            "dieu chinh ky han"]):
+        return "gia_han"
+    return ""
 
 
 def get_session_token():
@@ -190,8 +205,10 @@ def save(rows, csv_path="bond_latepay_raw.csv", json_path="bond_latepay_raw.json
         json.dump(rows, f, ensure_ascii=False)
     n_late = sum(1 for x in rows if x["loai_su_kien"] == "cham_tra")
     n_cured = sum(1 for x in rows if x["loai_su_kien"] == "khac_phuc")
+    n_gh = sum(1 for x in rows if x["loai_su_kien"] == "gia_han")
     print(f"Đã lưu {len(rows)} tin bất thường -> {csv_path} / {json_path}")
-    print(f"  Trong đó: {n_late} CBTT chậm trả · {n_cured} CBTT khắc phục (thanh toán sau chậm)")
+    print(f"  Trong đó: {n_late} CBTT chậm trả · {n_cured} CBTT khắc phục (thanh toán sau chậm) "
+          f"· {n_gh} CBTT gia hạn/đổi điều khoản")
 
 
 if __name__ == "__main__":

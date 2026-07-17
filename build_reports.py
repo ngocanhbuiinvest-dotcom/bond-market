@@ -392,6 +392,20 @@ def _split_codes(s):
     return [c.strip() for c in str(s or "").split(",") if c.strip()]
 
 
+def load_giahan_codes():
+    """Tập mã TP có CBTT GIA HẠN / đổi điều khoản-kỳ hạn (bond_latepay_scraper.classify_event).
+    Dùng làm BẰNG CHỨNG của HNX để cho phép dời ngày đáo hạn theo VSD."""
+    if not os.path.exists(LPRAW):
+        return set()
+    lp = pd.read_csv(LPRAW, dtype=str).fillna("")
+    if "loai_su_kien" not in lp.columns:
+        return set()
+    out = set()
+    for s in lp[lp["loai_su_kien"] == "gia_han"]["ma_tp"]:
+        out.update(c.upper() for c in _split_codes(s))
+    return out
+
+
 def outstanding_by_bond(df, bb):
     """Dư nợ gốc CÒN LẠI theo mã TP (đồng) = giá trị phát hành − đã mua lại, KHÔNG trừ đáo hạn
        (mã chậm trả tuy quá hạn danh nghĩa nhưng gốc thực tế CHƯA trả). Dùng để quy dư nợ cho mã chậm trả."""
@@ -459,6 +473,73 @@ def load_latepay(dno_map=None, total_out_ty=None):
           + (f" = {kpi['pct_total']}% tổng dư nợ" if kpi["pct_total"] else "")
           + f" · {kpi['n_cured']} khắc phục")
     return {"rows": rows, "kpi": kpi, "dno": code_dno}
+
+
+def load_giahan(out=None):
+    """Tab GIA HẠN / ĐỔI ĐIỀU KHOẢN (user chốt 17/07/2026 — kênh này trước đây bị bỏ không dùng).
+
+    Ý nghĩa: gia hạn = TÁI CẤU TRÚC NỢ -> tín hiệu rủi ro sớm, thường đi trước chậm trả.
+    Dữ liệu: bond_latepay_raw.csv, loai_su_kien == 'gia_han' (classify_event của scraper).
+    Gộp về CẤP MÃ: số lần gia hạn, lần gần nhất, dư nợ hiện tại, có kèm chậm trả không,
+    ngày đáo hạn đã được dời theo VSD hay chưa.
+    """
+    if not os.path.exists(LPRAW):
+        return None
+    lp = pd.read_csv(LPRAW, dtype=str).fillna("")
+    if "loai_su_kien" not in lp.columns:
+        return None
+    gh = lp[lp["loai_su_kien"] == "gia_han"].copy()
+    if gh.empty:
+        return None
+    gh["dt"] = pd.to_datetime(gh["ngay_dang_tin"], format="%d/%m/%Y", errors="coerce")
+    gh = gh.dropna(subset=["dt"]).sort_values("dt")
+
+    cham_codes = set()
+    for s in lp[lp["loai_su_kien"] == "cham_tra"]["ma_tp"]:
+        cham_codes.update(c.upper() for c in _split_codes(s))
+
+    # thông tin cấp mã từ bảng dư nợ (dư nợ, TCPH, nhóm, ĐH hiện hành, nguồn ĐH)
+    info = {}
+    if out is not None:
+        for x in out["detail"].itertuples(index=False):
+            info[str(x.ma_tp).upper()] = {
+                "dn": x.dn, "nhom": x.nhom, "gt": round(x.remaining / TY, 1),
+                "dh": (x.dh.strftime("%d/%m/%Y") if pd.notna(x.dh) else ""),
+                "ndh": getattr(x, "nguon_dh", "HNX"), "tt": x.trang_thai}
+
+    agg = {}
+    for x in gh.itertuples(index=False):
+        for c in _split_codes(x.ma_tp):
+            k = c.upper()
+            a = agg.setdefault(k, {"ma": c, "n": 0, "lan_cuoi": "", "dn_cbtt": x.ten_dn})
+            a["n"] += 1
+            a["lan_cuoi"] = x.ngay_dang_tin          # đã sort theo ngày -> giữ bản cuối
+    rows = []
+    for k, a in agg.items():
+        i = info.get(k, {})
+        rows.append({"ma": a["ma"], "n": a["n"], "d": a["lan_cuoi"],
+                     "dn": i.get("dn") or a["dn_cbtt"], "nhom": i.get("nhom", "Khác"),
+                     "gt": i.get("gt", None), "dh": i.get("dh", ""),
+                     "ndh": i.get("ndh", "HNX"), "tt": i.get("tt", ""),
+                     "cham": (k in cham_codes)})
+    rows.sort(key=lambda r: (-(r["gt"] or 0), -r["n"]))
+
+    n_dn = len({r["dn"] for r in rows})
+    dno = round(sum(r["gt"] or 0 for r in rows), 0)
+    n_cham = sum(1 for r in rows if r["cham"])
+    n_fix = sum(1 for r in rows if r["ndh"] != "HNX")
+    kpi = {"n_events": int(len(gh)), "n_ma": len(rows), "n_dn": n_dn, "dno": dno,
+           "n_cham": n_cham, "n_nhieu_lan": sum(1 for r in rows if r["n"] > 1),
+           "n_fix_dh": n_fix,
+           "pct_cham": (round(n_cham / len(rows) * 100, 1) if rows else 0),
+           "first": f"{gh['dt'].min():%d/%m/%Y}", "last": f"{gh['dt'].max():%d/%m/%Y}"}
+    print(f"Gia hạn/đổi điều khoản: {kpi['n_events']} lượt · {kpi['n_ma']} mã · {n_dn} TCPH "
+          f"· dư nợ {dno:,.0f} tỷ · {n_cham} mã ({kpi['pct_cham']}%) kèm chậm trả "
+          f"· {n_fix} mã đã dời ĐH theo VSD")
+    # ev = cấp LƯỢT CBTT (cho biểu đồ theo thời gian); rows = cấp MÃ (cho bảng)
+    ev = [{"d": x.ngay_dang_tin, "dn": x.ten_dn, "ma": x.ma_tp, "td": x.tieu_de,
+           "nhom": classify(x.ten_dn), "file": x.file_id} for x in gh.itertuples(index=False)]
+    return {"rows": rows, "ev": ev, "kpi": kpi}
 
 
 def load_updates(max_changes=300):
@@ -558,6 +639,31 @@ def compute_outstanding(df, bb):
                  "gt_con_lai_num", "nguon"]]
 
     m = pd.concat([face, only], ignore_index=True)
+
+    # ---- GIA HẠN (user chốt 17/07/2026): HNX XÁC NHẬN sự kiện, VSD chỉ BỔ SUNG NGÀY MỚI.
+    # Mã được CBTT gia hạn/đổi điều khoản thì ngày đáo hạn ở bảng phát hành là ngày CŨ
+    # -> `m.loc[dh < today, remaining] = 0` ép dư nợ về 0 OAN. Bảng phát hành/mua lại không có
+    # ngày mới (nằm trong PDF), nhưng VSD có ghi (đã kiểm: chênh đúng +365/+730 ngày, trùng ngày/tháng).
+    # CHỈ dời ngày khi CÓ CBTT gia hạn xác nhận -> HNX vẫn là nguồn QUYẾT ĐỊNH, VSD chỉ cấp ngày.
+    # Đây là mở rộng của quy tắc dh = MAX(phát hành, mua lại) đã chốt 15/07 (cùng mục đích cứu mã).
+    gh_codes, xr = load_giahan_codes(), load_xref()
+    m["nguon_dh"] = "HNX"
+    if gh_codes and xr:
+        dhs, srcs = [], []
+        for ma, dh in zip(m["ma_tp"], m["dh"]):
+            k = str(ma).strip().upper()
+            rec = xr.get(k)
+            vdh = pd.to_datetime((rec or {}).get("dh", ""), format="%d/%m/%Y", errors="coerce")
+            if k in gh_codes and pd.notna(vdh) and (pd.isna(dh) or vdh > dh):
+                dhs.append(vdh); srcs.append("VSD (CBTT gia hạn)")
+            else:
+                dhs.append(dh); srcs.append("HNX")
+        n_fix = sum(1 for s in srcs if s != "HNX")
+        if n_fix:
+            print(f"Gia hạn: dời ngày đáo hạn theo VSD cho {n_fix} mã có CBTT gia hạn xác nhận")
+        m["dh"] = pd.Series(dhs, index=m.index)
+        m["nguon_dh"] = srcs
+
     m["remaining"] = m["gt_con_lai_num"].where(m["gt_con_lai_num"].notna(), m["face"])
     m.loc[m["dh"] < today, "remaining"] = 0
     m["remaining"] = m["remaining"].clip(lower=0)
@@ -705,7 +811,7 @@ def build_outstanding_sheets(wb, out):
 
 
 # ---------- JSON cho dashboard ----------
-def build_json(df, out, bb=None, sec=None, rating=None, latepay=None):
+def build_json(df, out, bb=None, sec=None, rating=None, latepay=None, giahan=None):
     def recs(d):
         return json.loads(d.to_json(orient="records", force_ascii=False))
 
@@ -720,6 +826,8 @@ def build_json(df, out, bb=None, sec=None, rating=None, latepay=None):
         present |= {r["nhom"] for r in rating["rows"]}
     if latepay:
         present |= {r["nhom"] for r in latepay["rows"]}
+    if giahan:
+        present |= {r["nhom"] for r in giahan["rows"]}
     group_order = order_groups(present)
 
     # dữ liệu cấp-đợt cho dashboard tự lọc/tổng hợp (năm/quý/tháng theo ngày phát hành)
@@ -800,6 +908,7 @@ def build_json(df, out, bb=None, sec=None, rating=None, latepay=None):
         "sec": sec,
         "rating": rating,
         "latepay": latepay,
+        "giahan": giahan,
         "updates": load_updates(),
     }
     with open("dashboard_data.json", "w", encoding="utf-8") as f:
@@ -840,5 +949,6 @@ if __name__ == "__main__":
     if latepay is None:
         print("(!) Chưa có bond_latepay_raw.csv - bỏ qua tab Chậm trả gốc/lãi.")
     build_excel(df, out)
-    build_json(df, out, bb if out is not None else None, sec, rating, latepay)
+    giahan = load_giahan(out)
+    build_json(df, out, bb if out is not None else None, sec, rating, latepay, giahan)
     print("Hoàn tất.")

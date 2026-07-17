@@ -503,3 +503,45 @@ Truy vòng đời 4 mã vừa lên sàn — **đúng thứ tự PH → lưu ký 
 | VCB12602 | 23/06 | 09/07 (+16) | 21/07 (+12) | 28 ngày |
 => Khớp độ trễ đã đo (khâu 1 ≈ 15 ngày, khâu 2 ≈ 16 ngày). Danh sách "41 mã khoảng trống" sẽ TỰ RÚT DẦN
 khi các mã hoàn tất thủ tục — không phải lỗi dữ liệu.
+
+
+## KÊNH GIA HẠN — TAB THỨ 9 + SỬA DƯ NỢ TÍNH THIẾU (17/07/2026 v6)
+
+### Bối cảnh: user gợi ý "67 mã quá hạn chưa rõ lý do — có thể do chậm trả, check danh sách chậm trả"
+Đã check kỹ (3 kênh): **chỉ 34/101 mã (~1/3) có dấu vết chậm trả** — giả thuyết đúng nhưng KHÔNG phải
+nguyên nhân chính. 🐛 **2 LỖI SO KHỚP CỦA CHÍNH TA** lộ ra khi kiểm: (a) bảng **chậm trả** ghi tên DN
+KHÔNG có tiền tố mã ('Công ty Cổ phần Bông Sen') còn bảng **phát hành** CÓ ('HDB - NH TMCP ...')
+-> so tên trực tiếp giữa 2 bảng HNX luôn trượt, phải suy tên TỪ MÃ; (b) tên TCPH bên VSD khác định dạng cả hai.
+
+### 🔑 PHÁT HIỆN LỚN: kênh GIA HẠN (trước đây bỏ không dùng)
+Danh sách chậm trả chỉ là 411/2.223 tin bất thường. Soi phần còn lại -> **563 lượt CBTT gia hạn / 620 mã**.
+🐛 **BẪY TỪ KHÓA**: HNX ghi "thay đổi **ĐIỀU KHOẢN, ĐIỀU KIỆN**" — regex viết ngược thứ tự
+("điều kiện, điều khoản") khớp **0 tin**. Bộ từ khóa ĐÚNG (đã đưa vào `classify_event`):
+`gia han` · `keo dai ky han/thoi han` · `dieu khoan, dieu kien` · `dieu khoan va dieu kien` ·
+`noi dung ky han` · `thay doi ky han` · `dieu chinh ky han`. **Ưu tiên chậm trả TRƯỚC gia hạn**
+(tin vừa báo chậm vừa xin gia hạn thì bản chất là chậm trả).
+`bond_latepay_scraper.classify_event` giờ trả 4 giá trị: `cham_tra` (411) · `khac_phuc` (5) ·
+**`gia_han` (563)** · `''` (1.244).
+
+### DƯ NỢ ĐANG BỊ TÍNH THIẾU — đã sửa (user chốt: "chỉ 9 mã có CBTT xác nhận")
+`compute_outstanding` ép `remaining = 0` khi `dh < today`. Mã ĐÃ GIA HẠN có ngày đáo hạn ở bảng phát hành
+là **ngày CŨ** -> bị ép về 0 OAN. Ngày mới nằm trong PDF (dự án không OCR) **nhưng VSD CÓ ghi**:
+đã kiểm chênh đúng **+365/+730 ngày, TRÙNG ngày/tháng** -> gia hạn 1-2 năm, không thể là lỗi ngẫu nhiên.
+**NGUYÊN TẮC USER CHỐT: HNX XÁC NHẬN sự kiện, VSD chỉ BỔ SUNG NGÀY** — chỉ dời `dh` khi mã có CBTT
+gia hạn trên HNX (`load_giahan_codes()`) VÀ `vsd_dh > dh`. Giữ HNX là nguồn quyết định.
+(User đã cân nhắc & TỪ CHỐI phương án lấy MAX cả 3 nguồn cho mọi mã = +14,1 nghìn tỷ, vì 10/19 mã
+chỉ có VSD nói, không có CBTT xác nhận.)
+Kết quả: **13 mã dời ngày · 9 mã có dư nợ > 0 -> +6,2 nghìn tỷ**; 4 mã dời rồi vẫn quá hạn nên vẫn = 0.
+**Tổng dư nợ 1.139,0 -> 1.145,2 nghìn tỷ · số mã 1.282 -> 1.291.** Cột `nguon_dh` (HNX / VSD (CBTT gia hạn)).
+Đây là mở rộng của quy tắc `dh = MAX(phát hành, mua lại)` chốt 15/07 — cùng mục đích cứu mã bị ngày cũ ép về 0.
+
+### TAB 9 "Gia hạn / đổi điều khoản" (dashboard lên 9 tab)
+`load_giahan(out)` -> `{rows (cấp MÃ), ev (cấp LƯỢT CBTT, cho biểu đồ thời gian), kpi}`;
+`build_json(..., giahan)`; `_rebuild_sec.py` + `main()` đều đã gọi. Tab: 6 KPI · combo lượt CBTT theo
+thời gian · dư nợ theo nhóm ngành · top TCPH · bảng cấp mã (Số lần gia hạn — **nhiều lần = rủi ro cao hơn**,
+in đậm vàng khi > 1 · Gia hạn gần nhất · Dư nợ · Ngày đáo hạn kèm **dấu ⟳** khi dời theo VSD · Kèm chậm trả).
+**Số liệu: 563 lượt · 620 mã · 72 TCPH · dư nợ 19.907 tỷ · 34 mã gia hạn NHIỀU LẦN · 25 mã (4,0%) kèm chậm trả.**
+Ý nghĩa nghiệp vụ: gia hạn = **tái cấu trúc nợ -> tín hiệu rủi ro sớm, thường ĐI TRƯỚC chậm trả**.
+
+VERIFY: mở dashboard thật — tab hiện "620 mã", 0 lỗi JS, biểu đồ + bảng render, dấu ⟳ đúng ở
+SVACH2124004 / PDCCH2124001; KPI tab lưu hành đã lên 1.145 nghìn tỷ / 1.291 mã.
