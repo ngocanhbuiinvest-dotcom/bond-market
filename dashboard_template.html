@@ -87,8 +87,7 @@
   <div class="tab" data-tab="out">Trái phiếu đang lưu hành<small id="tt_out"></small></div>
   <div class="tab" data-tab="sec">Giao dịch thứ cấp<small id="tt_sec"></small></div>
   <div class="tab" data-tab="rating">Xếp hạng tín nhiệm<small id="tt_rating"></small></div>
-  <div class="tab" data-tab="late">Chậm trả gốc/lãi<small id="tt_late"></small></div>
-  <div class="tab" data-tab="gh">Gia hạn / đổi điều khoản<small id="tt_gh"></small></div>
+  <div class="tab" data-tab="late">Chậm trả &amp; gia hạn<small id="tt_late"></small></div>
   <div class="tab" data-tab="upd">Cập nhật &amp; thay đổi<small id="tt_upd"></small></div>
 </div>
 
@@ -347,10 +346,15 @@
         <button class="mini" id="td_csv">⭳ Xuất CSV</button></div>
       <div class="scroll"><table><thead><tr id="td_head"></tr></thead><tbody id="td_body"></tbody></table></div></div>
   </div>
-</section>
+  <!-- ---------- PHẦN 2: GIA HẠN (gộp chung tab vì gia hạn là DẤU HIỆU SỚM của chậm trả) ---------- -->
+  <div id="gh_block">
+  <div style="margin:30px 0 16px;padding-top:22px;border-top:2px solid #2b3a4d">
+    <h2 style="margin:0 0 6px;font-size:19px;color:#f2b84b">Gia hạn / đổi điều khoản — dấu hiệu sớm</h2>
+    <div style="color:var(--muted);font-size:13px">
+      Gia hạn = tái cấu trúc nợ, thường xuất hiện <b>TRƯỚC</b> khi chuyển thành chậm trả ở phần trên.
+    </div>
+  </div>
 
-<!-- ===================== TAB GIA HẠN / ĐỔI ĐIỀU KHOẢN ===================== -->
-<section id="panel-gh" class="hide">
   <div class="filterbar">
     <div class="fld"><label>Năm công bố</label><select id="fg_year"></select></div>
     <div class="fld"><label>Nhóm TCPH</label><select id="fg_group"></select></div>
@@ -389,6 +393,8 @@
         <button class="mini" id="gd_csv">⭳ Xuất CSV</button></div>
       <div class="scroll"><table><thead><tr id="gd_head"></tr></thead><tbody id="gd_body"></tbody></table></div></div>
   </div>
+
+  </div><!-- /gh_block -->
 </section>
 
 <!-- ===================== TAB CẬP NHẬT & THAY ĐỔI ===================== -->
@@ -1327,9 +1333,12 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
    rows = cấp MÃ (bảng) · ev = cấp LƯỢT CBTT (biểu đồ thời gian). */
 (function(){
   const G=DATA.giahan;
-  if(!G||!G.rows||!G.rows.length){const t=document.querySelector('[data-tab="gh"]');if(t)t.style.display='none';return;}
+  // Đã GỘP vào tab "Chậm trả & gia hạn" -> thiếu dữ liệu thì ẩn RIÊNG phần gia hạn, không đụng tab.
+  if(!G||!G.rows||!G.rows.length){document.getElementById('gh_block')?.classList.add('hide');return;}
   const GR=G.rows,EV=G.ev||[];
-  document.getElementById('tt_gh').textContent=fmt(G.kpi.n_ma)+' mã';
+  // badge tab dùng chung: "<lượt chậm trả> · <mã gia hạn>"
+  const _tt=document.getElementById('tt_late');
+  if(_tt)_tt.textContent=(_tt.textContent?_tt.textContent+' · ':'')+fmt(G.kpi.n_ma)+' mã gia hạn';
   const years=[...new Set(GR.map(r=>{const d=parseDMY(r.d);return isNaN(d)?null:d.getFullYear();}).filter(Boolean))].sort((a,b)=>b-a);
   fillSel(document.getElementById('fg_year'),years);
   fillSel(document.getElementById('fg_group'),GROUPS);

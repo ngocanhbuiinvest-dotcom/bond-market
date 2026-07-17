@@ -588,3 +588,25 @@ Trạng thái dư nợ · Kèm chậm trả.
 `n_qua_hanchot`.
 VERIFY: dashboard thật — 0 lỗi JS; tab lưu hành về 1.282 mã, hết dấu ⟳; SBPCB2124002 hiện
 "5 lần · gốc 23/12/2024 -> mới 23/12/2026 · 2.0 năm ⚠ · hạn chót 23/12/2026".
+
+
+## GỘP GIA HẠN VÀO TAB CHẬM TRẢ (user chốt 17/07/2026 v8) — dashboard về **8 tab**
+
+User: *"gộp vào 1 tab"*. Tab 9 riêng đã BỎ; nội dung gia hạn chuyển vào **tab "Chậm trả & gia hạn"**
+(`#panel-late`), đặt Ở DƯỚI phần chậm trả, ngăn bằng divider + tiêu đề
+**"Gia hạn / đổi điều khoản — dấu hiệu sớm"**. Lý do nghiệp vụ: gia hạn xảy ra TRƯỚC chậm trả
+-> xem cùng màn hình thấy được diễn tiến rủi ro.
+
+Thay đổi kỹ thuật (nếu sau này sửa tiếp, nhớ các điểm này):
+- Nhãn tab: "Chậm trả gốc/lãi" -> **"Chậm trả & gia hạn"**; **badge gộp** `411 lượt · 620 mã gia hạn`
+  (module gia hạn NỐI thêm vào `#tt_late` thay vì ghi `#tt_gh` — id `tt_gh` KHÔNG còn).
+- `<section id="panel-gh">` và nút `[data-tab="gh"]` đã XÓA. Phần gia hạn bọc trong **`#gh_block`**
+  bên trong `#panel-late`; khi không có dữ liệu -> `gh_block.classList.add('hide')`
+  (TRƯỚC đây ẩn cả tab — không còn tab để ẩn nữa).
+- HAI module JS giữ nguyên, ĐỘC LẬP: chậm trả dùng id `fl_*`/`kl`/`td_*`/`cl_*`;
+  gia hạn dùng `fg_*`/`kg`/`gd_*`/`cg_*`. Hai bộ lọc trong CÙNG 1 tab nhưng không giẫm chân nhau.
+- `renderLate()` và `renderGH()` vẫn được gọi độc lập lúc khởi tạo.
+
+VERIFY trên dashboard thật: 8 tab · 0 lỗi JS · cùng 1 panel có ĐỦ 2 bảng (`#td_body` 842 dòng chậm trả,
+`#gd_body` 620 dòng gia hạn) · **lọc chéo độc lập** (lọc chậm trả "Bất động sản" -> 842->686, gia hạn
+giữ nguyên 620; lọc gia hạn "kèm chậm trả" -> 620->25, chậm trả giữ nguyên 842) · reset về đúng số cũ.
