@@ -505,7 +505,11 @@ def load_giahan(out=None):
             info[str(x.ma_tp).upper()] = {
                 "dn": x.dn, "nhom": x.nhom, "gt": round(x.remaining / TY, 1),
                 "dh": (x.dh.strftime("%d/%m/%Y") if pd.notna(x.dh) else ""),
-                "ndh": getattr(x, "nguon_dh", "HNX"), "tt": x.trang_thai}
+                "tt": x.trang_thai,
+                "dh_goc": (x.dh.strftime("%d/%m/%Y") if pd.notna(x.dh) else ""),
+                "dh_gh": (x.dh_gh.strftime("%d/%m/%Y") if pd.notna(x.dh_gh) else ""),
+                "dh_gh_dt": (x.dh_gh if pd.notna(x.dh_gh) else None),
+                "dh_dt": (x.dh if pd.notna(x.dh) else None)}
 
     agg = {}
     for x in gh.itertuples(index=False):
@@ -514,28 +518,41 @@ def load_giahan(out=None):
             a = agg.setdefault(k, {"ma": c, "n": 0, "lan_cuoi": "", "dn_cbtt": x.ten_dn})
             a["n"] += 1
             a["lan_cuoi"] = x.ngay_dang_tin          # đã sort theo ngày -> giữ bản cuối
+    today = pd.Timestamp(datetime.now().date())
     rows = []
     for k, a in agg.items():
         i = info.get(k, {})
+        # HẠN CHÓT PHÁP LÝ = đáo hạn GỐC + 2 năm (NĐ08/2023: gia hạn TỐI ĐA 2 năm).
+        # Quá mốc này thì hết đường gia hạn -> phải trả hoặc thành chậm trả (user chốt 17/07/2026).
+        dg = i.get("dh_dt")
+        hc = (dg + pd.Timedelta(days=730)) if dg is not None else None
+        dm = i.get("dh_gh_dt")     # ngày đáo hạn theo LỊCH GIA HẠN MỚI NHẤT (VSD)
         rows.append({"ma": a["ma"], "n": a["n"], "d": a["lan_cuoi"],
                      "dn": i.get("dn") or a["dn_cbtt"], "nhom": i.get("nhom", "Khác"),
-                     "gt": i.get("gt", None), "dh": i.get("dh", ""),
-                     "ndh": i.get("ndh", "HNX"), "tt": i.get("tt", ""),
-                     "cham": (k in cham_codes)})
+                     "gt": i.get("gt", None),
+                     "dhg": i.get("dh_goc", ""),      # đáo hạn GỐC (bảng chính vẫn dùng ngày này)
+                     "dhm": i.get("dh_gh", ""),       # đáo hạn theo lịch gia hạn MỚI NHẤT
+                     "sn": (int((dm - dg).days) if (dm is not None and dg is not None) else None),
+                     "hc": (hc.strftime("%d/%m/%Y") if hc is not None else ""),
+                     "hcq": (bool(hc < today) if hc is not None else None),   # hạn chót đã qua?
+                     "tt": i.get("tt", ""), "cham": (k in cham_codes)})
     rows.sort(key=lambda r: (-(r["gt"] or 0), -r["n"]))
 
     n_dn = len({r["dn"] for r in rows})
     dno = round(sum(r["gt"] or 0 for r in rows), 0)
     n_cham = sum(1 for r in rows if r["cham"])
-    n_fix = sum(1 for r in rows if r["ndh"] != "HNX")
+    n_moi = sum(1 for r in rows if r["dhm"])
+    n_qua = sum(1 for r in rows if r["hcq"])
+    n_kich = sum(1 for r in rows if r["sn"] and r["sn"] >= 728)
     kpi = {"n_events": int(len(gh)), "n_ma": len(rows), "n_dn": n_dn, "dno": dno,
            "n_cham": n_cham, "n_nhieu_lan": sum(1 for r in rows if r["n"] > 1),
-           "n_fix_dh": n_fix,
+           "n_moi": n_moi, "n_qua_hanchot": n_qua, "n_kich_tran": n_kich,
            "pct_cham": (round(n_cham / len(rows) * 100, 1) if rows else 0),
            "first": f"{gh['dt'].min():%d/%m/%Y}", "last": f"{gh['dt'].max():%d/%m/%Y}"}
     print(f"Gia hạn/đổi điều khoản: {kpi['n_events']} lượt · {kpi['n_ma']} mã · {n_dn} TCPH "
           f"· dư nợ {dno:,.0f} tỷ · {n_cham} mã ({kpi['pct_cham']}%) kèm chậm trả "
-          f"· {n_fix} mã đã dời ĐH theo VSD")
+          f"· {n_moi} mã có lịch gia hạn mới ({n_kich} kịch trần 2 năm) "
+          f"· {n_qua} mã QUÁ hạn chót pháp lý")
     # ev = cấp LƯỢT CBTT (cho biểu đồ theo thời gian); rows = cấp MÃ (cho bảng)
     ev = [{"d": x.ngay_dang_tin, "dn": x.ten_dn, "ma": x.ma_tp, "td": x.tieu_de,
            "nhom": classify(x.ten_dn), "file": x.file_id} for x in gh.itertuples(index=False)]
@@ -640,29 +657,23 @@ def compute_outstanding(df, bb):
 
     m = pd.concat([face, only], ignore_index=True)
 
-    # ---- GIA HẠN (user chốt 17/07/2026): HNX XÁC NHẬN sự kiện, VSD chỉ BỔ SUNG NGÀY MỚI.
-    # Mã được CBTT gia hạn/đổi điều khoản thì ngày đáo hạn ở bảng phát hành là ngày CŨ
-    # -> `m.loc[dh < today, remaining] = 0` ép dư nợ về 0 OAN. Bảng phát hành/mua lại không có
-    # ngày mới (nằm trong PDF), nhưng VSD có ghi (đã kiểm: chênh đúng +365/+730 ngày, trùng ngày/tháng).
-    # CHỈ dời ngày khi CÓ CBTT gia hạn xác nhận -> HNX vẫn là nguồn QUYẾT ĐỊNH, VSD chỉ cấp ngày.
-    # Đây là mở rộng của quy tắc dh = MAX(phát hành, mua lại) đã chốt 15/07 (cùng mục đích cứu mã).
+    # ---- GIA HẠN (user chốt 17/07/2026 v2): **NGÀY ĐÁO HẠN GIỮ THEO NGÀY GỐC**.
+    # Đã cân nhắc & BÁC BỎ phương án dời `dh` theo ngày gia hạn mới của VSD: làm vậy sẽ đổi dư nợ
+    # (+6,2 nghìn tỷ) dựa trên nguồn ngoài HNX. User chốt: bảng chính dùng NGÀY GỐC; lịch gia hạn mới
+    # chỉ hiển thị ở BẢNG GIA HẠN RIÊNG (tab Gia hạn) -> xem `load_giahan()`.
+    # `dh_gh` = ngày đáo hạn theo LỊCH GIA HẠN MỚI NHẤT (VSD ghi, chỉ nhận khi HNX có CBTT gia hạn
+    # xác nhận). Chỉ là THÔNG TIN, KHÔNG dùng để tính remaining.
     gh_codes, xr = load_giahan_codes(), load_xref()
-    m["nguon_dh"] = "HNX"
-    if gh_codes and xr:
-        dhs, srcs = [], []
-        for ma, dh in zip(m["ma_tp"], m["dh"]):
-            k = str(ma).strip().upper()
-            rec = xr.get(k)
-            vdh = pd.to_datetime((rec or {}).get("dh", ""), format="%d/%m/%Y", errors="coerce")
-            if k in gh_codes and pd.notna(vdh) and (pd.isna(dh) or vdh > dh):
-                dhs.append(vdh); srcs.append("VSD (CBTT gia hạn)")
-            else:
-                dhs.append(dh); srcs.append("HNX")
-        n_fix = sum(1 for s in srcs if s != "HNX")
-        if n_fix:
-            print(f"Gia hạn: dời ngày đáo hạn theo VSD cho {n_fix} mã có CBTT gia hạn xác nhận")
-        m["dh"] = pd.Series(dhs, index=m.index)
-        m["nguon_dh"] = srcs
+    dh_gh = []
+    for ma, dh in zip(m["ma_tp"], m["dh"]):
+        k = str(ma).strip().upper()
+        vdh = pd.to_datetime((xr.get(k) or {}).get("dh", ""), format="%d/%m/%Y", errors="coerce")
+        dh_gh.append(vdh if (k in gh_codes and pd.notna(vdh) and (pd.isna(dh) or vdh > dh)) else pd.NaT)
+    m["dh_gh"] = pd.Series(dh_gh, index=m.index)
+    n_gh = int(m["dh_gh"].notna().sum())
+    if n_gh:
+        print(f"Gia hạn: {n_gh} mã có ngày đáo hạn mới (chỉ hiện ở tab Gia hạn; "
+              f"ngày đáo hạn & dư nợ vẫn theo NGÀY GỐC)")
 
     m["remaining"] = m["gt_con_lai_num"].where(m["gt_con_lai_num"].notna(), m["face"])
     m.loc[m["dh"] < today, "remaining"] = 0
