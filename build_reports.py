@@ -17,7 +17,7 @@ from openpyxl.utils import get_column_letter
 
 # Phân loại ngành (13 nhóm: OVERRIDES tay -> VietCap ICB -> từ khóa) - dùng chung
 from sector_map import classify, classify_with_source, order_groups, GROUP_ORDER
-from vsd_xref import load_xref, doi_chieu
+from vsd_xref import load_xref, doi_chieu, mo_ta_nguon
 
 RAW = "bond_issuance_raw.csv"
 BBRAW = "bond_buyback_raw.csv"
@@ -486,6 +486,32 @@ def load_updates(max_changes=300):
     return {"state": state, "changes": changes}
 
 
+def tenor_years(period):
+    """Kỳ hạn GỐC quy về NĂM (user 17/07/2026: muốn số năm, không phải khoảng).
+    Nguồn ghi 3 đơn vị: '3 Năm' | '36 Tháng' | '728 Ngày' -> đều quy về năm."""
+    m = re.search(r"(\d+)\s*(Năm|Tháng|Ngày)", str(period or ""), re.I)
+    if not m:
+        return None
+    n, unit = int(m.group(1)), m.group(2).lower()
+    y = n if unit == "năm" else (n / 12.0 if unit == "tháng" else n / 365.0)
+    return round(y, 1)
+
+
+def load_dkgd():
+    """Danh mục ĐKGD HNX -> {mã CBTT: {tt, gd_dau, gd_cuoi, ma_gd}} (trạng thái + ngày giao dịch).
+    Thiếu file -> {} -> cột trạng thái ghi 'Chưa ĐKGD', pipeline vẫn chạy."""
+    if not os.path.exists(CATRAW):
+        return {}
+    c = pd.read_csv(CATRAW, dtype=str).fillna("")
+    out = {}
+    for _, r in c.iterrows():
+        k = (r.get("ma_cbtt") or "").strip().upper()
+        if k and k not in out:
+            out[k] = {"tt": r.get("trang_thai", "").strip(), "gd_dau": r.get("ngay_gd_dau", "").strip(),
+                      "gd_cuoi": r.get("ngay_gd_cuoi", "").strip(), "ma_gd": r.get("ma_gd", "").strip()}
+    return out
+
+
 def compute_outstanding(df, bb):
     """Dư nợ đang lưu hành cấp mã TP trên universe các đợt PHÁT HÀNH.
        remaining = (đáo hạn->0) else (có mua lại-> 'còn lại sau mua lại' mới nhất) else (giá trị phát hành)."""
@@ -501,7 +527,8 @@ def compute_outstanding(df, bb):
     face = iss.groupby("ma_tp").agg(
         face=("gia_tri_phat_hanh", "sum"), dh=("dh", "max"),
         nhom=("nhom", "first"), dn=("ten_dn", "first"),
-        khn=("ky_han_nhom", "first")).reset_index()
+        khn=("ky_han_nhom", "first"), kyhan=("ky_han", "first"),
+        ph=("ph_date", "min")).reset_index()
     coup = (iss.groupby("ma_tp").apply(wcoupon, include_groups=False)
               .rename("coupon").reset_index())
     face = face.merge(coup, on="ma_tp", how="left")
@@ -525,7 +552,10 @@ def compute_outstanding(df, bb):
     only = only.rename(columns={"gt_phat_hanh_num": "face", "dh_bb": "dh", "ten_dn": "dn"})
     only["coupon"] = None
     only["nguon"] = "CBTT mua lại"
-    only = only[["ma_tp", "face", "dh", "nhom", "dn", "khn", "coupon", "gt_con_lai_num", "nguon"]]
+    only["kyhan"] = only["ky_han"]
+    only["ph"] = pd.to_datetime(only["ngay_phat_hanh"], format="%d/%m/%Y", errors="coerce")
+    only = only[["ma_tp", "face", "dh", "nhom", "dn", "khn", "kyhan", "ph", "coupon",
+                 "gt_con_lai_num", "nguon"]]
 
     m = pd.concat([face, only], ignore_index=True)
     m["remaining"] = m["gt_con_lai_num"].where(m["gt_con_lai_num"].notna(), m["face"])
@@ -540,6 +570,39 @@ def compute_outstanding(df, bb):
     m["trang_thai"] = m.apply(status, axis=1)
     m["nam_dh"] = m["dh"].dt.year
 
+    # ---- KỲ HẠN GỐC (năm) + NGÀY GIAO DỊCH + TRẠNG THÁI ĐKGD (user 17/07/2026)
+    m["kyhan_nam"] = m["kyhan"].apply(tenor_years)
+    dk = load_dkgd()
+    m["ngay_gd"] = [(dk.get(str(k).upper()) or {}).get("gd_dau", "") for k in m["ma_tp"]]
+    _gd_cuoi = [(dk.get(str(k).upper()) or {}).get("gd_cuoi", "") for k in m["ma_tp"]]
+    _tt_cat = [(dk.get(str(k).upper()) or {}).get("tt", "") for k in m["ma_tp"]]
+
+    def _tt_dkgd(tt, gd_dau, rem, dh, ml):
+        """Trạng thái ĐKGD + LÝ DO hủy (user chốt: 'do mua lại' / 'do đáo hạn').
+        Quan sát 17/07: mã hủy ĐKGD mà còn dư nợ đều đáo hạn trong ~1 tuần tới
+        -> hủy ĐKGD xảy ra TRƯỚC đáo hạn, đúng mô hình vòng đời => ghi 'do sắp đáo hạn'."""
+        if not tt:
+            return "Chưa ĐKGD"
+        if tt == "Đã hủy ĐKGD":
+            if rem <= 0 and pd.notna(dh) and dh < today:
+                return "Đã hủy ĐKGD (do đáo hạn)"
+            if rem <= 0 and ml > 0:
+                return "Đã hủy ĐKGD (do mua lại)"
+            if pd.notna(dh) and dh >= today and (dh - today).days <= 45:
+                return "Đã hủy ĐKGD (do sắp đáo hạn)"
+            if ml > 0:
+                return "Đã hủy ĐKGD (do mua lại)"
+            return "Đã hủy ĐKGD"
+        if tt == "Chờ giao dịch":
+            return "Chờ giao dịch"
+        return "Đang ĐKGD"
+
+    _ml = bb.groupby("ma_tp")["gt_mua_lai_num"].sum()
+    m["tt_dkgd"] = [_tt_dkgd(tt, gd, rem, dh, _ml.get(ma, 0))
+                    for tt, gd, rem, dh, ma in
+                    zip(_tt_cat, m["ngay_gd"], m["remaining"], m["dh"], m["ma_tp"])]
+    m["ngay_gd_cuoi"] = _gd_cuoi
+
     # ---- LỚP ĐỐI CHIẾU VSD (user chốt 17/07/2026: HNX là CƠ SỞ, VSD chỉ phủ lên)
     # Không đổi bất kỳ số nào của HNX, không thêm mã VSD-only vào universe.
     # Thiếu vsd_bond_raw.csv -> xref rỗng -> mọi mã ghi "Không có ở VSD", pipeline vẫn chạy.
@@ -549,6 +612,8 @@ def compute_outstanding(df, bb):
     m["nguon_vsd"] = [x[1] for x in dc]
     m["gt_vsd"] = [x[2] for x in dc]
     m["chenh_vsd"] = [x[3] for x in dc]
+    m["nguon_dc"] = [mo_ta_nguon(k, r / TY, (g or 0))
+                     for k, r, g in zip(m["khop"], m["remaining"], m["gt_vsd"])]
 
     # Universe = toàn bộ mã (phát hành ∪ mua lại) -> aggregate mua lại khớp với tab "Mua lại"
     iss_set = set(m["ma_tp"])
@@ -619,20 +684,24 @@ def build_outstanding_sheets(wb, out):
     ws.add_chart(ch, "D2")
 
     # Sheet: Chi tiết dư nợ (cấp mã)
-    d = m[["ma_tp", "dn", "nhom", "face", "remaining", "dh", "trang_thai", "nguon",
-           "gt_vsd", "chenh_vsd", "khop", "nguon_vsd"]].copy()
+    # Dư nợ để MỘT cột (user 17/07: HNX & VSD trùng nhau thì 2 cột gây rối) — cột "Nguồn" nêu rõ
+    # khác biệt khi lệch, còn "Giá trị VSD/Chênh" chỉ điền cho dòng KHÔNG khớp.
+    d = m[["ma_tp", "dn", "nhom", "face", "remaining", "kyhan_nam", "ph", "ngay_gd", "dh",
+           "tt_dkgd", "trang_thai", "nguon_dc", "gt_vsd", "chenh_vsd", "nguon"]].copy()
     d["face"] = (d["face"] / TY).round(1)
     d["remaining"] = (d["remaining"] / TY).round(1)
+    d["ph"] = d["ph"].dt.strftime("%d/%m/%Y")
     d["dh"] = d["dh"].dt.strftime("%d/%m/%Y")
+    khop_mask = m["khop"].values == "Khớp"
+    d.loc[khop_mask, ["gt_vsd", "chenh_vsd"]] = None   # khớp -> để trống, khỏi lặp lại số dư nợ
     d = d.sort_values("remaining", ascending=False)
-    # "Nguồn HNX" = xuất xứ dòng trong chính dữ liệu HNX (Phát hành / CBTT mua lại);
-    # "Nguồn VSD" = trạng thái mã bên VSD; "Khớp" = kết quả đối chiếu 2 nguồn.
     d.columns = ["Mã TP", "Tổ chức phát hành", "Nhóm", "Giá trị phát hành (tỷ)",
-                 "Dư nợ đang lưu hành (tỷ)", "Ngày đáo hạn", "Trạng thái", "Nguồn HNX",
-                 "Giá trị VSD (tỷ)", "Chênh HNX-VSD (tỷ)", "Khớp", "Nguồn VSD"]
+                 "Dư nợ (tỷ)", "Kỳ hạn gốc (năm)", "Ngày phát hành", "Ngày giao dịch",
+                 "Ngày đáo hạn", "Trạng thái ĐKGD", "Trạng thái dư nợ", "Nguồn",
+                 "Giá trị VSD (tỷ) - chỉ khi lệch", "Chênh HNX-VSD (tỷ)", "Xuất xứ dòng (HNX)"]
     ws2 = wb.create_sheet("Chi tiết dư nợ")
-    write_df(ws2, d, number_cols=["Giá trị phát hành (tỷ)", "Dư nợ đang lưu hành (tỷ)",
-                                  "Giá trị VSD (tỷ)", "Chênh HNX-VSD (tỷ)"])
+    write_df(ws2, d, number_cols=["Giá trị phát hành (tỷ)", "Dư nợ (tỷ)",
+                                  "Giá trị VSD (tỷ) - chỉ khi lệch", "Chênh HNX-VSD (tỷ)"])
 
 
 # ---------- JSON cho dashboard ----------
@@ -689,6 +758,9 @@ def build_json(df, out, bb=None, sec=None, rating=None, latepay=None):
                 "y": (int(x["dh"].year) if pd.notna(x["dh"]) else 0),
                 "klcl": (None if pd.isna(x["klcl_nam"]) else float(x["klcl_nam"])),
                 "nguon": x["nguon"],
+                "kyn": (None if pd.isna(x["kyhan_nam"]) else float(x["kyhan_nam"])),
+                "ph": (x["ph"].strftime("%d/%m/%Y") if pd.notna(x["ph"]) else ""),
+                "ngd": x["ngay_gd"], "ttdk": x["tt_dkgd"],
                 # pandas biến None -> NaN khi cột lẫn số => phải dùng pd.isna, `is None` KHÔNG bắt được
                 # (NaN lọt sang JS thành NaN, cột hiện "0" thay vì "–").
                 "khop": x["khop"], "nvsd": x["nguon_vsd"],

@@ -754,15 +754,22 @@ const VSD_TIP={
   'Lệch':'Hai nguồn chênh nhau — xem cột Giá trị VSD; có thể do độ trễ cập nhật hoặc lỗi dữ liệu một phía',
   'VSD đã hủy ĐK':'VSD đã hủy lưu ký nhưng HNX còn ghi dư nợ',
   'Không có ở VSD':'Không tìm thấy mã ở danh sách VSD (TP mới chưa kịp lưu ký, hoặc TP cũ trước thời kỳ ĐKGD)'};
-const vsdPill=s=>s==='Hiệu lực'?'<span class="pill st-ok">Hiệu lực</span>'
-  :s==='Hủy đăng ký'?'<span class="pill st-no">Hủy đăng ký</span>'
-  :'<span class="pill" style="color:var(--muted)">Không có</span>';
-const khopPill=(k,ch)=>{
-  const tip=VSD_TIP[k]||'';
-  if(k==='Khớp')return `<span class="pill st-ok" title="${tip}">Khớp</span>`;
-  if(k==='Lệch')return `<span class="pill" style="border-color:#f2b84b;color:#f2b84b" title="${tip}">Lệch ${ch>0?'+':''}${fmt(ch)} tỷ</span>`;
-  if(k==='VSD đã hủy ĐK')return `<span class="pill st-no" title="${tip}">VSD đã hủy ĐK</span>`;
-  return `<span class="pill" style="color:var(--muted)" title="${tip}">Không có ở VSD</span>`;
+// Cột "Nguồn": TRÙNG -> chỉ ghi trạng thái khớp; KHÔNG trùng -> nêu RÕ khác biệt ngay trong ô
+// (user chốt 17/07/2026: dư nợ HNX & VSD trùng nhau thì để 1 cột, 2 cột gây rối).
+const nguonCell=r=>{
+  const tip=(VSD_TIP[r.khop]||'')+(r.nguon==='CBTT mua lại'?' · Dòng dựng từ CBTT mua lại (không có ở bảng phát hành)':'');
+  if(r.khop==='Khớp')return `<span class="pill st-ok" title="HNX = VSD = ${fmt(r.gt)} tỷ. ${tip}">✓ Khớp HNX = VSD</span>`;
+  if(r.khop==='Lệch')return `<span class="pill" style="border-color:#f2b84b;color:#f2b84b" title="${tip}">HNX ${fmt(r.gt)} ≠ VSD ${fmt(r.gvsd)} tỷ</span>`;
+  if(r.khop==='VSD đã hủy ĐK')return `<span class="pill st-no" title="${tip}">VSD đã hủy lưu ký</span>`;
+  return `<span class="pill" style="color:var(--muted)" title="${tip}">Chỉ có ở HNX</span>`;
+};
+// Trạng thái ĐKGD — vòng đời: Chờ giao dịch -> Đang ĐKGD -> Đã hủy ĐKGD (trước đáo hạn/mua lại)
+const ttdkPill=t=>{
+  if(!t)return '–';
+  if(t==='Đang ĐKGD')return '<span class="pill st-ok" title="Đang đăng ký giao dịch trên sàn TPRL">Đang ĐKGD</span>';
+  if(t==='Chờ giao dịch')return '<span class="pill" style="border-color:#5fd0d8;color:#5fd0d8" title="Đã lưu ký, chờ tới ngày giao dịch đầu tiên">Chờ giao dịch</span>';
+  if(t==='Chưa ĐKGD')return '<span class="pill" style="color:var(--muted)" title="Không có trong danh mục ĐKGD của HNX (TP mới chưa lên sàn, hoặc TP cũ trước thời kỳ ĐKGD)">Chưa ĐKGD</span>';
+  return `<span class="pill st-no" title="Hủy đăng ký giao dịch — theo quy trình, hủy ĐKGD trên HNX xảy ra TRƯỚC khi hủy lưu ký tại VSD">${t.replace('Đã hủy ĐKGD','Đã hủy GD')}</span>`;
 };
 const kpiCards=(host,defs)=>document.getElementById(host).innerHTML=defs.map((d,i)=>
   `<div class="kpi"><div class="l">${d[0]}</div><div class="v" style="color:${d[3]||COLORS[i%6]}">${d[1]}</div><div class="u">${d[2]}</div></div>`).join('');
@@ -876,13 +883,13 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
     {k:'face',t:'Giá trị PH (tỷ)',type:'num',r:1,cell:r=>fmt(r.face)},
     {k:'gt',t:'Dư nợ (tỷ)',type:'num',r:1,cell:r=>fmt(r.gt)},
     {k:'ls',t:'Coupon (%)',type:'num',r:1,cell:r=>r.ls!=null?fmt1(r.ls):'–'},
-    {k:'khn',t:'Kỳ hạn',type:'str',cell:r=>r.khn||''},
-    {k:'dh',t:'Ngày đáo hạn',type:'date',cell:r=>r.dh},
+    {k:'kyn',t:'Kỳ hạn gốc (năm)',type:'num',r:1,w:'95px',cell:r=>r.kyn!=null?fmt1(r.kyn):'–'},
+    {k:'ph',t:'Ngày phát hành',type:'date',w:'105px',cell:r=>r.ph||'–'},
+    {k:'ngd',t:'Ngày giao dịch',type:'date',w:'105px',cell:r=>r.ngd||'–'},
+    {k:'dh',t:'Ngày đáo hạn',type:'date',w:'105px',cell:r=>r.dh},
     {k:'klcl',t:'Còn lại (năm)',type:'num',r:1,cell:r=>r.klcl!=null?fmt1(r.klcl):'–'},
-    {k:'nguon',t:'Nguồn HNX',type:'str',w:'110px',cell:r=>r.nguon==='CBTT mua lại'?'<span class="pill st-no">CBTT mua lại</span>':'<span class="pill st-ok">Phát hành</span>'},
-    {k:'nvsd',t:'Nguồn VSD',type:'str',w:'105px',cell:r=>vsdPill(r.nvsd)},
-    {k:'gvsd',t:'Giá trị VSD (tỷ)',type:'num',r:1,cell:r=>r.gvsd!=null?fmt(r.gvsd):'–'},
-    {k:'khop',t:'Khớp',type:'str',w:'130px',cell:r=>khopPill(r.khop,r.chvsd)},
+    {k:'ttdk',t:'Trạng thái',type:'str',w:'165px',cell:r=>ttdkPill(r.ttdk)},
+    {k:'khop',t:'Nguồn',type:'str',w:'190px',cell:r=>nguonCell(r)},
   ],{k:'gt',d:-1});
   const S={};
   function read(){S.g=fo_group.value;S.y=fo_year.value;S.t=fo_tenor.value;S.s=(fo_q.value||'').toLowerCase();}

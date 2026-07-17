@@ -31,6 +31,9 @@ KHOP = "Khớp"
 LECH = "Lệch"
 VSD_HUY = "VSD đã hủy ĐK"
 NO_VSD = "Không có ở VSD"
+# HNX đã tất toán (đáo hạn/mua lại hết) nhưng VSD chưa hủy lưu ký -> ĐỘ TRỄ VÒNG ĐỜI, KHÔNG phải sai số.
+# Tách khỏi "Lệch" vì gộp chung sẽ gây hiểu nhầm: 436/466 mã lệch thuộc loại này (17/07/2026).
+VSD_CHUA_HUY = "VSD chưa hủy lưu ký"
 
 NGUON_VSD_HL = "Hiệu lực"
 NGUON_VSD_HUY = "Hủy đăng ký"
@@ -116,8 +119,29 @@ def doi_chieu(ma_cbtt, gt_hnx, xref):
     chenh = (gt_hnx or 0) - gt_vsd
     if not r["hieu_luc"]:
         return VSD_HUY, NGUON_VSD_HUY, round(gt_vsd / TY, 1), round(chenh / TY, 1)
-    khop = KHOP if abs(chenh) <= TOL else LECH
+    if abs(chenh) <= TOL:
+        khop = KHOP
+    elif (gt_hnx or 0) <= 0 < gt_vsd:
+        # HNX hết dư nợ (đáo hạn / mua lại hết) mà VSD còn hiệu lực = đang chờ hủy lưu ký.
+        khop = VSD_CHUA_HUY
+    else:
+        khop = LECH
     return khop, NGUON_VSD_HL, round(gt_vsd / TY, 1), round(chenh / TY, 1)
+
+
+def mo_ta_nguon(khop, gt_hnx_ty, gt_vsd_ty):
+    """Cột "Nguồn" (user chốt 17/07/2026): TRÙNG -> chỉ ghi trạng thái khớp;
+    KHÔNG trùng -> nêu RÕ khác biệt ngay trong ô, khỏi phải dò cột khác."""
+    if khop == KHOP:
+        return "Khớp (HNX = VSD)"
+    if khop == LECH:
+        return f"Lệch: HNX {gt_hnx_ty:,.1f} ≠ VSD {gt_vsd_ty:,.1f} (tỷ)"
+    if khop == VSD_CHUA_HUY:
+        return (f"Khác (độ trễ): HNX đã tất toán, VSD chưa hủy lưu ký "
+                f"({gt_vsd_ty:,.1f} tỷ còn đăng ký)")
+    if khop == VSD_HUY:
+        return f"Khác: VSD đã hủy lưu ký (HNX còn {gt_hnx_ty:,.1f} tỷ)"
+    return "Khác: chỉ có ở HNX, không có ở VSD"
 
 
 if __name__ == "__main__":
