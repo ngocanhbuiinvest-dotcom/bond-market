@@ -28,6 +28,7 @@ Xuất: vsd_bond_raw.csv / .json
 import argparse
 import csv
 import json
+import os
 import re
 import sys
 import time
@@ -270,6 +271,8 @@ def fetch_detail(args):
 
 
 def scrape_details(rows):
+    if not rows:
+        return []
     print(f"Lấy chi tiết {len(rows)} mã ({DETAIL_WORKERS} luồng)...")
     t0 = time.time()
     out = []
@@ -283,6 +286,56 @@ def scrape_details(rows):
     print(f"  xong {len(out)} mã, có mệnh giá: {ok}, có mã CBTT: "
           f"{sum(1 for r in out if r.get('ma_cbtt'))} ({time.time()-t0:.0f}s)")
     return out
+
+
+# ---------------------------------------------------------------- incremental
+# Trang CHI TIẾT chiếm ~11/12 phút thời gian chạy, trong khi các trường của nó (mệnh giá, mã CBTT,
+# ngày cấp GCN, lãi suất) gần như BẤT BIẾN sau khi đăng ký. => Áp đúng nguyên tắc của dự án
+# ("nguồn đắt + bất biến -> incremental", như bond_secondary_scraper.py):
+#   LIST luôn quét đủ (rẻ, ~1 phút, bắt được đổi số lượng/tình trạng)
+#   DETAIL chỉ gọi cho mã MỚI hoặc mã có dấu hiệu ĐỔI.
+# Các trường LIST quyết định phải lấy lại chi tiết (đổi 1 trong số này -> giá trị ĐK có thể đổi):
+WATCH_FIELDS = ["so_luong", "tinh_trang", "ngay_dao_han", "ky_han"]
+
+
+def load_existing(csv_path="vsd_bond_raw.csv"):
+    """-> {detail_id (fallback ma_ck): row cũ}. Thiếu file -> {} -> tự động chạy như full."""
+    if not os.path.exists(csv_path):
+        return {}
+    try:
+        with open(csv_path, encoding="utf-8-sig") as f:
+            rows = list(csv.DictReader(f))
+    except Exception as e:
+        print(f"  ! không đọc được {csv_path} ({e}) -> chạy full", file=sys.stderr)
+        return {}
+    return {(r.get("detail_id") or r.get("ma_ck") or ""): r for r in rows if r.get("ma_ck")}
+
+
+def merge_incremental(rows, old):
+    """Tái dùng chi tiết cũ cho mã KHÔNG đổi; trả (rows đã vá, danh sách cần gọi chi tiết)."""
+    need, reused, changed = [], 0, []
+    for r in rows:
+        k = r.get("detail_id") or r.get("ma_ck") or ""
+        o = old.get(k)
+        if not o or not o.get("menh_gia"):        # mã mới, hoặc lần trước chưa lấy được chi tiết
+            need.append(r)
+            continue
+        diff = [f for f in WATCH_FIELDS if (o.get(f) or "") != (r.get(f) or "")]
+        if diff:
+            changed.append((r.get("ma_ck"), diff))
+            need.append(r)
+            continue
+        for c in DETAIL_COLUMNS:                  # giữ nguyên chi tiết cũ
+            r[c] = o.get(c, "")
+        reused += 1
+    n_new = len(need) - len(changed)
+    print(f"Incremental: tái dùng chi tiết {reused} mã · cần gọi lại {len(need)} "
+          f"({n_new} mã mới, {len(changed)} mã đổi)")
+    for ma, d in changed[:10]:
+        print(f"    đổi: {ma} ({', '.join(d)})")
+    if len(changed) > 10:
+        print(f"    … và {len(changed)-10} mã đổi khác")
+    return rows, need
 
 
 def save(rows, summary, csv_path="vsd_bond_raw.csv", json_path="vsd_bond_raw.json"):
@@ -305,13 +358,28 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-detail", action="store_true",
                     help="chỉ lấy danh sách, bỏ qua trang chi tiết (không có mệnh giá/giá trị)")
+    ap.add_argument("--incremental", action="store_true",
+                    help="tái dùng chi tiết đã có; chỉ gọi trang chi tiết cho mã mới/đổi "
+                         "(~1 phút thay vì ~12) — dùng cho update_daily.py")
+    ap.add_argument("--full", action="store_true",
+                    help="ép quét lại TOÀN BỘ chi tiết (định kỳ soát lại, bỏ qua --incremental)")
     a = ap.parse_args()
 
     t0 = time.time()
-    print(f"Bắt đầu crawl VSD TPDN riêng lẻ lúc {datetime.now():%Y-%m-%d %H:%M:%S}")
+    mode = "FULL" if (a.full or not a.incremental) else "INCREMENTAL"
+    print(f"Bắt đầu crawl VSD TPDN riêng lẻ ({mode}) lúc {datetime.now():%Y-%m-%d %H:%M:%S}")
     sess = get_session()
-    rows, summary = scrape_list(sess)
+    rows, summary = scrape_list(sess)          # LIST luôn quét đủ (rẻ)
     if not a.no_detail:
-        rows = scrape_details(rows)
+        if a.incremental and not a.full:
+            old = load_existing()
+            if old:
+                rows, need = merge_incremental(rows, old)
+                scrape_details(need)           # fetch_detail vá TẠI CHỖ vào chính dict trong rows
+            else:
+                print("  (chưa có dữ liệu cũ -> chạy full)")
+                rows = scrape_details(rows)
+        else:
+            rows = scrape_details(rows)
     save(rows, summary)
     print(f"Xong sau {time.time()-t0:.0f}s. Tổng: {len(rows)} mã.")

@@ -13,8 +13,12 @@ if (-not (Test-Path $bat)) { Write-Error "Không thấy $bat"; exit 1 }
 $action   = New-ScheduledTaskAction -Execute $bat -WorkingDirectory $dir
 $trigger  = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At $runAt
 # StartWhenAvailable: nếu máy tắt lúc 16:30 thì chạy bù khi bật lại (không bỏ lỡ ngày)
+# AllowStartIfOnBatteries + DontStopIfGoingOnBatteries: BẮT BUỘC với máy laptop.
+#   Mặc định của New-ScheduledTaskSettingsSet là CHẶN khi dùng pin và GIẾT task khi rút sạc
+#   -> lần chạy 16:30 ngày 16/07/2026 chết với mã 0xC000013A (giờ tan làm, rút sạc mang máy về).
+#   Đây là lý do lịch chưa từng chạy thành công. Đừng bỏ 2 cờ này.
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
-              -MultipleInstances IgnoreNew
+              -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $desc     = "Cập nhật dữ liệu TPDN riêng lẻ (HNX) 16:30 ngày làm việc: full re-scrape nguồn hay đổi + incremental GD thứ cấp + nhật ký thay đổi + cảnh báo mã chậm trả mới + rebuild dashboard."
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `

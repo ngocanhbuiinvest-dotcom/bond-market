@@ -47,6 +47,10 @@ SOURCES = [
      ["article_id"], ["tinh_trang", "loai_su_kien"], "ten_dn", True),
     ("Ngành ICB",  ["vietcap_sector_scraper.py"], "vietcap_companies_raw.csv",
      ["code"], [], "name", False),
+    # VSD: LIST rẻ (~50s) nhưng trang CHI TIẾT đắt (~11') và gần như BẤT BIẾN -> incremental
+    # (nguyên tắc 2, giống GD thứ cấp). Theo dõi `tinh_trang` để bắt mã VSD hủy lưu ký.
+    ("Lưu ký VSD", ["vsd_bond_scraper.py", "--incremental"], "vsd_bond_raw.csv",
+     ["ma_ck"], ["tinh_trang", "so_luong"], "ten_tcdkck", True),
     ("GD thứ cấp", ["bond_secondary_scraper.py", "--incremental"], "bond_secondary_raw.csv",
      ["ngay_gd", "ma_tp"], [], "ma_tp", False),
 ]
