@@ -682,3 +682,35 @@ legend `cs_glg` display:none); cơ cấu nhóm vẫn còn ở tab Lưu hành (gh
 VERIFY toàn bộ trên browser: 0 lỗi JS · 8 tab KPI đúng số (đối chiếu tay: 1.325/2.533=52,3% ✓, vòng quay
 135,9% = số đã tính offline ✓, khớp VSD 92,5% ✓) · badge 3 tab hiện đủ · lọc Nhóm ở Tổng hợp đổi cả hàng
 rủi ro lẫn maturity wall (BĐS: đáo hạn 12T = **31% dư nợ nhóm** vs 18% toàn thị trường — insight lộ ra ngay).
+
+
+## NÂNG CẤP BẢNG CHI TIẾT + DỌN KPI KHỐI LƯỢNG + BỎ CHART TOP TCPH (user yêu cầu — 17/07/2026 v11)
+
+### Bảng chi tiết — sửa TẬP TRUNG trong `makeTable()` nên áp cho CẢ 8 bảng cùng lúc
+1. **Bộ lọc ngay dòng tiêu đề**: hàng `tr.fr` ngay dưới header, MỖI CỘT một ô input "lọc…" —
+   gõ là lọc (khớp chuỗi con, không phân biệt hoa thường, trên GIÁ TRỊ THÔ `r[k]` của cột).
+   Lọc nhiều cột = AND. Bộ đếm hiện `X / tổng dòng`; `exportCSV` xuất theo dòng ĐÃ LỌC.
+2. **Cuộn ngang**: CSS `.scroll table{width:max-content;min-width:100%}` + `th,td{white-space:nowrap}`
+   (bảng Lưu hành: scrollWidth 2130px vs khung 460px -> thanh cuộn hoạt động).
+3. **Cột Tổ chức phát hành thu hẹp**: mọi cột `k==='dn'` tự nhận class `c-dn`
+   (max-width 230px + ellipsis) và `title` = tên đầy đủ (tooltip khi rê chuột).
+4. **Nút thu–phóng bảng**: makeTable tự chèn nút `⛶ Phóng to` cạnh bộ đếm; toggle class
+   **`.tbl-max`** trên `.card` -> `position:fixed;inset:14px;z-index:999` + backdrop
+   `box-shadow 200vmax rgba(0,0,0,.6)` + khoá scroll body; bấm lại (`✕ Thu nhỏ`) trả về.
+
+### KPI khối lượng — BỎ (user: "khối lượng phát hành không quan trọng")
+Lý do nghiệp vụ: mệnh giá mỗi mã khác nhau (100 nghìn ~ 1 tỷ/TP) nên cộng KHỐI LƯỢNG giữa các mã
+là vô nghĩa — chỉ GIÁ TRỊ mới so được. Đã bỏ ở tab Tổng hợp: 2 tile "Khối lượng PH/ML" trong
+"Khoảng thời gian tùy chọn" (thay bằng tile **"Ròng (PH − ML)"** có so kỳ trước) + 2 dòng KL trong
+bảng "Tăng trưởng MoM·QoQ·YoY" (còn 2 dòng giá trị). Cột "Khối lượng (TP)" trong BẢNG chi tiết
+GD thứ cấp vẫn giữ (dữ liệu tra cứu cấp mã, không phải KPI thống kê).
+
+### Chart "Top 15 TCPH theo dư nợ đang lưu hành" — BỎ (tab Lưu hành)
+Card + lệnh render `hbar(co_top …)` đã xoá; hàm dùng chung `gTop()` GIỮ (nơi khác còn dùng pattern).
+Nhu cầu "top TCPH" đáp ứng bằng: bảng chi tiết sort cột Dư nợ + lọc cột dn (mạnh hơn chart tĩnh).
+
+VERIFY trên dashboard thật (0 lỗi JS): lọc `ma=vhm` -> "22 / 1,282 dòng", mọi dòng chứa vhm ✓;
+lọc chồng 2 cột -> AND đúng; reset đúng; ellipsis dn = 230px + tooltip ✓; cuộn ngang ✓;
+phóng to: position fixed z999, nút đổi nhãn, thu về static ✓; chart Top đã biến mất ✓;
+"Khối lượng" = 0 lần xuất hiện trên tab Tổng hợp ✓; hàng lọc có mặt ở mọi bảng (issue 10 ô,
+out 13 ô, late+gh 22 ô) ✓.

@@ -70,6 +70,20 @@
   th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel);cursor:pointer;user-select:none}
   th.r,td.r{text-align:right}th:hover{color:var(--txt)}.ar{font-size:9px;opacity:.7}
   .scroll{max-height:420px;overflow:auto}
+  /* bảng chi tiết: cuộn NGANG khi bảng dài hơn khung, ô không xuống dòng */
+  .scroll table{width:max-content;min-width:100%}
+  .scroll th,.scroll td{white-space:nowrap}
+  /* cột Tổ chức phát hành thu hẹp — tên đầy đủ xem ở tooltip */
+  .scroll td.c-dn{max-width:230px;overflow:hidden;text-overflow:ellipsis}
+  /* hàng bộ lọc dưới tiêu đề */
+  tr.fr th{padding:3px 5px;background:var(--panel)}
+  tr.fr input.cf{width:100%;min-width:56px;box-sizing:border-box;background:#0d1520;
+    border:1px solid var(--line);border-radius:6px;color:#cfe2f3;padding:4px 7px;font-size:12px}
+  tr.fr input.cf::placeholder{color:#54677c}
+  /* chế độ phóng to bảng: card nổi toàn màn hình */
+  .card.tbl-max{position:fixed;inset:14px;z-index:999;overflow:auto;
+    box-shadow:0 0 0 200vmax rgba(0,0,0,.6)}
+  .card.tbl-max .scroll{max-height:calc(100vh - 210px)}
   .pill{padding:1px 7px;border-radius:20px;font-size:11px;border:1px solid var(--line)}
   .st-ok{color:#7fe0b6;border-color:#2f5b48}.st-no{color:var(--warn);border-color:#5b492f}
   .tip{position:fixed;pointer-events:none;background:#0b1119;border:1px solid var(--line);border-radius:7px;
@@ -246,7 +260,6 @@
     </div>
     <div class="card col5"><h3>Dư nợ theo nhóm TCPH</h3><div id="co_group"></div><div class="lg" id="co_glg"></div></div>
     <div class="card col7"><h3>Dư nợ theo kỳ hạn gốc</h3><div class="cs">nghìn tỷ VNĐ</div><div id="co_tenor"></div></div>
-    <div class="card col12"><h3>Top 15 TCPH theo dư nợ đang lưu hành</h3><div class="cs">nghìn tỷ VNĐ</div><div id="co_top"></div></div>
     <div class="card col12"><h3>Bảng chi tiết trái phiếu đang lưu hành</h3>
       <div class="cs" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <input id="fo_q" placeholder="Lọc tên DN / mã TP…" style="min-width:240px">
@@ -781,26 +794,53 @@ const isInvestmentGrade=g=>ratingRank(g)<=ratingRank('BBB-');   // hạng đầu
 
 // ---- generic sortable table ----
 function makeTable(headId,bodyId,cntId,cols,def){
-  const st={k:def.k,d:def.d};let cur=[];
+  // Nâng cấp 17/07/2026 (user yêu cầu, áp CHUNG mọi bảng chi tiết):
+  //   (1) hàng BỘ LỌC ngay dưới tiêu đề — gõ là lọc, khớp chuỗi con trên giá trị thô từng cột;
+  //   (2) cột "Tổ chức phát hành" (k='dn') thu hẹp bằng ellipsis + tooltip tên đầy đủ;
+  //   (3) nút PHÓNG TO/THU NHỎ bảng (toggle .tbl-max trên .card);
+  //   (4) cuộn ngang: CSS .scroll table{width:max-content} + nowrap (xem khối CSS).
+  const st={k:def.k,d:def.d};let cur=[];const fil={};
   const thead=document.getElementById(headId);
   thead.innerHTML='<th class="r" style="cursor:default;width:44px">STT</th>'+
     cols.map(c=>`<th data-k="${c.k}" class="${c.r?'r':''}"${c.w?` style="width:${c.w}"`:''}>${c.t} <span class="ar"></span></th>`).join('');
   [...thead.children].forEach(th=>{if(!th.dataset.k)return;th.onclick=()=>{const k=th.dataset.k,col=cols.find(c=>c.k===k);
     if(st.k===k)st.d=-st.d;else{st.k=k;st.d=(col.type==='num'||col.type==='date')?-1:1;}draw();};});
+  // hàng bộ lọc theo cột (ngay dưới tiêu đề)
+  const ftr=document.createElement('tr');ftr.className='fr';
+  ftr.innerHTML='<th></th>'+cols.map(c=>`<th><input class="cf" data-fk="${c.k}" placeholder="lọc…" title="Lọc cột ${c.t}"></th>`).join('');
+  thead.parentElement.appendChild(ftr);
+  ftr.querySelectorAll('input.cf').forEach(inp=>{
+    inp.oninput=()=>{fil[inp.dataset.fk]=inp.value.trim().toLowerCase();draw();};});
+  function fRows(){const ks=Object.keys(fil).filter(k=>fil[k]);
+    return ks.length?cur.filter(r=>ks.every(k=>String(r[k]??'').toLowerCase().includes(fil[k]))):cur;}
   const tb=document.getElementById(bodyId);
-  function sortRows(){const col=cols.find(c=>c.k===st.k);
-    return [...cur].sort((a,b)=>{let x,y;
+  function sortRows(list){const col=cols.find(c=>c.k===st.k);
+    return [...list].sort((a,b)=>{let x,y;
       if(col.type==='date'){x=parseDMY(a[st.k]);y=parseDMY(b[st.k]);}
       else if(col.type==='num'){x=a[st.k]==null?-1e18:a[st.k];y=b[st.k]==null?-1e18:b[st.k];}
       else return st.d*(''+(a[st.k]||'')).localeCompare(''+(b[st.k]||''),'vi');
       return st.d*(x>y?1:x<y?-1:0);});}
-  function draw(){const s=sortRows();
-    tb.innerHTML=s.slice(0,600).map((r,i)=>`<tr><td class="r" style="color:var(--muted)">${i+1}</td>`+cols.map(c=>`<td class="${c.r?'r':''}">${c.cell(r)}</td>`).join('')+'</tr>').join('');
-    document.getElementById(cntId).textContent=fmt(cur.length)+' dòng'+(cur.length>600?' (hiển thị 600 đầu — xuất CSV để xem đủ)':'');
+  function draw(){const fr=fRows(),s=sortRows(fr);
+    tb.innerHTML=s.slice(0,600).map((r,i)=>`<tr><td class="r" style="color:var(--muted)">${i+1}</td>`+
+      cols.map(c=>{const cls=(c.r?'r ':'')+(c.k==='dn'?'c-dn':'');
+        const ti=c.k==='dn'?` title="${String(r.dn??'').replace(/"/g,'&quot;')}"`:'';
+        return `<td class="${cls.trim()}"${ti}>${c.cell(r)}</td>`;}).join('')+'</tr>').join('');
+    const nf=Object.keys(fil).filter(k=>fil[k]).length;
+    document.getElementById(cntId).textContent=(nf?fmt(fr.length)+' / ':'')+fmt(cur.length)+' dòng'
+      +(fr.length>600?' (hiển thị 600 đầu — xuất CSV để xem đủ)':'');
     [...thead.children].forEach(th=>{const ar=th.querySelector('.ar');if(ar)ar.textContent=(th.dataset.k===st.k)?(st.d>0?'▲':'▼'):'';});}
+  // nút phóng to / thu nhỏ bảng
+  const cntEl=document.getElementById(cntId);
+  if(cntEl){const xb=document.createElement('button');xb.className='mini';xb.textContent='⛶ Phóng to';
+    xb.style.marginLeft='8px';
+    xb.onclick=()=>{const card=cntEl.closest('.card');if(!card)return;
+      const on=card.classList.toggle('tbl-max');
+      xb.textContent=on?'✕ Thu nhỏ':'⛶ Phóng to';
+      document.body.style.overflow=on?'hidden':'';};
+    cntEl.after(xb);}
   return {set:rows=>{cur=rows;draw();},
     exportCSV:filename=>{const head=['STT',...cols.map(c=>c.t)];
-      const body=sortRows().map((r,i)=>[i+1,...cols.map(c=>r[c.k])]);
+      const body=sortRows(fRows()).map((r,i)=>[i+1,...cols.map(c=>r[c.k])]);
       downloadCSV(filename,[head,...body]);}};
 }
 const groupPill=n=>`<span class="pill" style="border-color:${gColor[n]||'#2b3a4d'};color:${gColor[n]||'#8fa3ba'}">${n}</span>`;
@@ -975,7 +1015,6 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
     curRowsO=rows;drawComboO();
     donut(document.getElementById('co_group'),gGroup(rows),document.getElementById('co_glg'));
     hbar(document.getElementById('co_tenor'),gBucket(rows,'khn',TEN_ORDER),'nghìn tỷ');
-    hbar(document.getElementById('co_top'),gTop(rows),'nghìn tỷ');
     T.set(rows);};
   ['fo_group','fo_year','fo_tenor'].forEach(id=>document.getElementById(id).onchange=renderOut);
   co_gran.onchange=drawComboO;
@@ -1149,10 +1188,12 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
       pb=BB.filter(r=>(!g||r.nhom===g)&&inP(parseDMY(r.ml)));
       prevLabel=` · Kỳ trước: ${fmtDate(pf)}–${fmtDate(pt)}`;}
     const tiles=[
+      // user 17/07/2026: KHỐI LƯỢNG không có ý nghĩa thống kê (mệnh giá mỗi mã khác nhau) -> chỉ GIÁ TRỊ
       ['Giá trị phát hành',fmt(Math.round(sum(iR,r=>r.gt))),'tỷ VNĐ',pi?growthPct(sum(iR,r=>r.gt),sum(pi,r=>r.gt)):null,'#4ea1ff'],
-      ['Khối lượng phát hành',fmt(sum(iR,r=>r.kl)),'trái phiếu',pi?growthPct(sum(iR,r=>r.kl),sum(pi,r=>r.kl)):null,'#4ea1ff'],
       ['Giá trị mua lại',fmt(Math.round(sum(bR,r=>r.gt))),'tỷ VNĐ',pb?growthPct(sum(bR,r=>r.gt),sum(pb,r=>r.gt)):null,'#37d0a0'],
-      ['Khối lượng mua lại',fmt(sum(bR,r=>r.kl)),'trái phiếu',pb?growthPct(sum(bR,r=>r.kl),sum(pb,r=>r.kl)):null,'#37d0a0'],
+      ['Ròng (PH − ML)',fmt(Math.round(sum(iR,r=>r.gt)-sum(bR,r=>r.gt))),'tỷ VNĐ',
+       (pi&&pb)?growthPct(sum(iR,r=>r.gt)-sum(bR,r=>r.gt),sum(pi,r=>r.gt)-sum(pb,r=>r.gt)):null,
+       (sum(iR,r=>r.gt)-sum(bR,r=>r.gt))>=0?'#4ea1ff':'#ff7a7a'],
     ];
     document.getElementById('rng_kpis').innerHTML=tiles.map(t=>
       `<div class="kpi"><div class="l">${t[0]}</div><div class="v" style="color:${t[4]}">${t[1]}</div><div class="u">${t[2]}${t[3]!=null?' · vs kỳ trước '+gCell(t[3]):''}</div></div>`).join('');
@@ -1183,9 +1224,7 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
     if(!key){document.getElementById('growth_body').innerHTML='';return;}
     const metrics=[
       ['Giá trị phát hành (tỷ)',iR,'ph',r=>r.gt],
-      ['Khối lượng phát hành (TP)',iR,'ph',r=>r.kl],
       ['Giá trị mua lại (tỷ)',bR,'ml',r=>r.gt],
-      ['Khối lượng mua lại (TP)',bR,'ml',r=>r.kl],
     ];
     document.getElementById('growth_body').innerHTML=metrics.map(([name,rows,df,vf])=>{
       const M=serM(rows,df,vf),Q=serQ(rows,df,vf),Y=serY(rows,df,vf);
