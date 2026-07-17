@@ -110,6 +110,8 @@
     <div class="badge" id="fs_info" style="margin-top:12px;margin-left:auto"></div>
   </div>
   <div class="kpis" id="ks"></div>
+  <div style="color:var(--muted);font-size:12px;margin:2px 2px 6px">Rủi ro &amp; áp lực đáo hạn (snapshot — chỉ áp dụng bộ lọc Nhóm TCPH)</div>
+  <div class="kpis" id="ks2"></div>
   <div class="grid">
     <!-- Hàng 1: biểu đồ cột hợp nhất Phát hành/Mua lại/Ròng theo thời gian + bộ lọc đơn vị & ngành -->
     <div class="card col12">
@@ -124,7 +126,7 @@
       <div class="lg" id="cs_mlg"></div>
     </div>
     <!-- Hàng 2: donut dư nợ + bảng tăng trưởng có bộ lọc kỳ -->
-    <div class="card col4"><h3>Dư nợ đang lưu hành theo nhóm</h3><div class="cs">Snapshot hiện tại</div><div id="cs_group"></div><div class="lg" id="cs_glg"></div></div>
+    <div class="card col4"><h3>Dư nợ theo năm đáo hạn (maturity wall)</h3><div class="cs">Snapshot hiện tại — cơ cấu theo nhóm xem ở tab Trái phiếu đang lưu hành</div><div id="cs_group"></div><div class="lg" id="cs_glg" style="display:none"></div></div>
     <div class="card col8">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
         <div><h3>Tăng trưởng MoM · QoQ · YoY</h3>
@@ -859,16 +861,17 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
   function flt(){return ROWS.filter(r=>(!S.y||r.y==S.y)&&(!S.q||r.q==S.q)&&(!S.m||r.m==S.m)&&(!S.g||r.nhom===S.g)&&(!S.tt||r.tt===S.tt)&&(!S.s||(r.dn+' '+r.ma).toLowerCase().includes(S.s)));}
   window.renderIssue=function(){read();const rows=flt();
     const tot=rows.reduce((a,r)=>a+r.gt,0),het=rows.filter(r=>r.tt==='Hết hiệu lực');
+    // KPI chuẩn hoá (rà 17/07/2026): tiền -> đếm -> chất lượng. Bỏ "BQ/đợt" (suy được từ 2 ô cạnh);
+    // "Hết hiệu lực" là cờ chất lượng dữ liệu -> chuyển xuống badge, không chiếm ô KPI.
     kpiCards('ki',[
+      ['Tổng giá trị phát hành',fmt(Math.round(tot/1000)),'nghìn tỷ VNĐ','#4ea1ff'],
       ['Số đợt phát hành',fmt(rows.length),fmt(uniq(rows,r=>r.ma))+' mã TP'],
       ['Số tổ chức phát hành',fmt(uniq(rows,r=>r.dn)),'doanh nghiệp'],
-      ['Tổng giá trị phát hành',fmt(Math.round(tot/1000)),'nghìn tỷ VNĐ'],
-      ['Giá trị bình quân/đợt',fmt1(rows.length?tot/rows.length:0),'tỷ VNĐ'],
-      ['Coupon bình quân',fmt1(wavg(rows,r=>r.ls)),'%/năm (gia quyền)'],
-      ['Đợt Hết hiệu lực',fmt(het.length),fmt(Math.round(het.reduce((a,r)=>a+r.gt,0)/1000))+' nghìn tỷ',het.length?'var(--warn)':''],
+      ['Coupon bình quân',fmt1(wavg(rows,r=>r.ls)),'%/năm (gia quyền theo giá trị)'],
     ]);
     const info=[];if(S.y)info.push('Năm '+S.y);if(S.q)info.push('Quý '+S.q);if(S.m)info.push('Tháng '+S.m);if(S.g)info.push(S.g);if(S.tt)info.push(S.tt);
-    fi_info.textContent=info.length?'Đang lọc: '+info.join(' · '):'Toàn bộ '+fmt(ROWS.length)+' đợt';
+    fi_info.textContent=(info.length?'Đang lọc: '+info.join(' · '):'Toàn bộ '+fmt(ROWS.length)+' đợt')
+      +(het.length?' · ⚠ '+fmt(het.length)+' đợt hết hiệu lực ('+fmt(Math.round(het.reduce((a,r)=>a+r.gt,0)/1000))+' nghìn tỷ)':'');
     curRows=rows;drawCombo();
     donut(document.getElementById('ci_group'),gGroup(rows),document.getElementById('ci_glg'));
     multiLine(document.getElementById('ci_coupsec'),couponBySectorYear(rows),document.getElementById('ci_cslg'),{pct:true});
@@ -903,13 +906,16 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
   function flt(){return BB.filter(r=>(!S.y||r.y==S.y)&&(!S.q||r.q==S.q)&&(!S.m||r.m==S.m)&&(!S.g||r.nhom===S.g)&&(!S.s||(r.dn+' '+r.ma).toLowerCase().includes(S.s)));}
   window.renderBB=function(){read();const rows=flt();
     const tot=rows.reduce((a,r)=>a+r.gt,0);
+    // "Mua lại / PH cùng kỳ" dùng CHUNG bộ lọc năm/quý/tháng/nhóm với tab này -> so sánh táo với táo.
+    // Bỏ toàn phần/một phần (chi tiết cấp bảng) + BQ/đợt (suy được).
+    const phck=ROWS.filter(r=>(!S.y||r.y==S.y)&&(!S.q||r.q==S.q)&&(!S.m||r.m==S.m)&&(!S.g||r.nhom===S.g))
+      .reduce((a,r)=>a+r.gt,0);
     kpiCards('kb',[
+      ['Tổng giá trị mua lại',fmt(Math.round(tot/1000)),'nghìn tỷ VNĐ','#37d0a0'],
       ['Số đợt mua lại',fmt(rows.length),fmt(uniq(rows,r=>r.ma))+' mã TP'],
       ['Số tổ chức mua lại',fmt(uniq(rows,r=>r.dn)),'doanh nghiệp'],
-      ['Tổng giá trị mua lại',fmt(Math.round(tot/1000)),'nghìn tỷ VNĐ'],
-      ['Giá trị bình quân/đợt',fmt1(rows.length?tot/rows.length:0),'tỷ VNĐ'],
-      ['Đợt mua lại toàn phần',fmt(rows.filter(r=>r.conlai<=0).length),'còn lại = 0'],
-      ['Đợt mua lại một phần',fmt(rows.filter(r=>r.conlai>0).length),'còn dư nợ'],
+      ['Mua lại / phát hành cùng kỳ',phck?fmt1(tot/phck*100):'–',
+       phck?'% · PH cùng kỳ '+fmt(Math.round(phck/1000))+' nghìn tỷ':'không có phát hành cùng kỳ'],
     ]);
     const info=[];if(S.y)info.push('Năm '+S.y);if(S.q)info.push('Quý '+S.q);if(S.m)info.push('Tháng '+S.m);if(S.g)info.push(S.g);
     fb_info.textContent=info.length?'Đang lọc: '+info.join(' · '):'Toàn bộ '+fmt(BB.length)+' đợt';
@@ -954,13 +960,15 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
   function flt(){return OUT.filter(r=>(!S.g||r.nhom===S.g)&&(!S.y||r.y==S.y)&&(!S.t||r.khn===S.t)&&(!S.s||(r.dn+' '+r.ma).toLowerCase().includes(S.s)));}
   window.renderOut=function(){read();const rows=flt();
     const tot=rows.reduce((a,r)=>a+r.gt,0);
+    // Gộp mã+TCPH 1 ô; bỏ "BQ/mã" (suy được). Thêm "Khớp VSD" = thành quả đối chiếu 2 nguồn:
+    // % dư nợ có số VSD trùng khớp -> thước đo độ tin cậy của chính con số dư nợ đang hiển thị.
+    const gtKhop=rows.filter(r=>r.khop==='Khớp').reduce((a,r)=>a+r.gt,0);
     kpiCards('ko',[
-      ['Số mã đang lưu hành',fmt(rows.length),fmt(uniq(rows,r=>r.dn))+' TCPH'],
-      ['Số tổ chức phát hành',fmt(uniq(rows,r=>r.dn)),'còn dư nợ'],
       ['Tổng dư nợ đang lưu hành',fmt(Math.round(tot/1000)),'nghìn tỷ VNĐ','var(--ok)'],
-      ['Dư nợ bình quân/mã',fmt1(rows.length?tot/rows.length:0),'tỷ VNĐ'],
-      ['Coupon bình quân',fmt1(wavg(rows,r=>r.ls)),'%/năm (gia quyền)'],
+      ['Số mã đang lưu hành',fmt(rows.length),fmt(uniq(rows,r=>r.dn))+' TCPH còn dư nợ'],
+      ['Coupon bình quân dư nợ',fmt1(wavg(rows,r=>r.ls)),'%/năm (gia quyền)'],
       ['Kỳ hạn còn lại BQ',fmt1(wavg(rows,r=>r.klcl)),'năm (gia quyền)'],
+      ['Khớp với VSD',tot?fmt1(gtKhop/tot*100):'–','% dư nợ trùng số đăng ký lưu ký VSD','#5fd0d8'],
     ]);
     const info=[];if(S.g)info.push(S.g);if(S.y)info.push('Đáo hạn '+S.y);if(S.t)info.push(S.t);
     fo_info.textContent=info.length?'Đang lọc: '+info.join(' · '):'Toàn bộ '+fmt(OUT.length)+' mã';
@@ -1029,13 +1037,21 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
     const days=new Set(rows.map(r=>r.d)),nb=new Set(rows.map(r=>r.ma));
     const dmap={};rows.forEach(r=>{dmap[r.d]=(dmap[r.d]||0)+r.gt;});
     let mx=0,mxd='';for(const d in dmap){if(dmap[d]>mx){mx=dmap[d];mxd=d;}}
+    // Bỏ trivia (phiên cao nhất, tổng KL — không so được giữa mã vì mệnh giá khác, số phiên).
+    // "Vòng quay 12T" = GTGD 12 tháng gần nhất / tổng dư nợ — thước đo thanh khoản; tính TOÀN thị trường
+    // (không theo bộ lọc) để mẫu số dư nợ và tử số cùng phạm vi.
+    if(window.__turn12==null){
+      let mxd2=0;SR.forEach(r=>{const t=parseDMY(r.d).getTime();if(t>mxd2)mxd2=t;});
+      const cut=mxd2-365*86400000;
+      const g12=SR.reduce((a,r)=>a+(parseDMY(r.d).getTime()>=cut?r.gt:0),0);
+      const duAll=OUT.reduce((a,r)=>a+r.gt,0);
+      window.__turn12={t:duAll?g12/duAll:null,g12};}
     kpiCards('kx',[
       ['Tổng giá trị giao dịch',fmt(Math.round(tot/1000)),fmt(days.size)+' phiên · nghìn tỷ','#ef8a3c'],
       ['Giá trị BQ/phiên',fmt1(days.size?tot/days.size:0),'tỷ VNĐ'],
-      ['Phiên cao nhất',fmt1(mx),'tỷ · '+(mxd||'–')],
-      ['Tổng khối lượng',fmt(totkl),'trái phiếu'],
-      ['Số mã từng giao dịch',fmt(nb.size),'mã TP'],
-      ['Số phiên giao dịch',fmt(days.size),'phiên','var(--ok)'],
+      ['Số mã từng giao dịch',fmt(nb.size),OUT.length?'≈ '+fmt1(nb.size/OUT.length*100)+'% số mã đang lưu hành':'mã TP'],
+      ['Vòng quay 12 tháng',window.__turn12.t!=null?fmt1(window.__turn12.t*100):'–',
+       '% dư nợ · GTGD 12T '+fmt(Math.round(window.__turn12.g12/1000))+' nghìn tỷ · toàn thị trường','var(--ok)'],
     ]);
     const info=[];if(S.y)info.push('Năm '+S.y);if(S.g)info.push(S.g);
     fx_info.textContent=info.length?'Đang lọc: '+info.join(' · '):'Toàn kỳ '+SEC.kpi.first+' – '+SEC.kpi.last;
@@ -1077,16 +1093,35 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
       let sc=0;codes.forEach(c=>{if(LP.dno[c]!=null)sc+=LP.dno[c];});
       const pc=LP.kpi.total_out_ty?sc/LP.kpi.total_out_ty*100:null;
       chamKPI=['Dư nợ chậm trả',fmt(Math.round(sc/1000)),(pc!=null?fmt1(pc)+'% dư nợ · ':'')+'nghìn tỷ · snapshot','var(--warn)'];}
+    // HÀNG 1 — thị trường (dòng tiền theo bộ lọc; dư nợ là SỐ NEO đặt đầu)
     kpiCards('ks',[
+      ['Dư nợ đang lưu hành',fmt(Math.round(du/1000)),fmt(ro.length)+' mã · snapshot · nghìn tỷ','var(--ok)'],
       ['Giá trị phát hành',fmt(Math.round(ph/1000)),fmt(ri.length)+' đợt · '+fmt(uniq(ri,r=>r.dn))+' TCPH · nghìn tỷ','#4ea1ff'],
       ['Giá trị mua lại trước hạn',fmt(Math.round(ml/1000)),fmt(rb.length)+' đợt · '+fmt(uniq(rb,r=>r.dn))+' TCPH · nghìn tỷ','#37d0a0'],
       ['Phát hành ròng (PH − ML)',fmt(Math.round((ph-ml)/1000)),'nghìn tỷ VNĐ',(ph-ml)>=0?'#4ea1ff':'#ff7a7a'],
-      ['Dư nợ đang lưu hành',fmt(Math.round(du/1000)),fmt(ro.length)+' mã · snapshot','var(--ok)'],
+    ]);
+    // HÀNG 2 — RỦI RO (rà 17/07/2026: trước đây tab Tổng hợp KHÔNG có khối rủi ro nào).
+    // Đáo hạn 12T tới = maturity wall trên rows đã lọc nhóm; gia hạn/quá hạn chót từ DATA.giahan.
+    const NOW2=Date.now(), Y1=NOW2+365*86400000;
+    const w12=ro.reduce((a,r)=>{const t=r.dh?parseDMY(r.dh).getTime():0;return a+(t>=NOW2&&t<=Y1?r.gt:0);},0);
+    let ghKPI=null,hcKPI=null;
+    if(DATA.giahan&&DATA.giahan.rows){
+      const gr=DATA.giahan.rows.filter(r=>!S.g||r.nhom===S.g);
+      const gdno=gr.reduce((a,r)=>a+(r.gt||0),0), qh=gr.filter(r=>r.hcq);
+      ghKPI=['Dư nợ mã đã gia hạn',fmt(Math.round(gdno/1000)),fmt(gr.length)+' mã · nghìn tỷ · dấu hiệu sớm','var(--warn)'];
+      hcKPI=['Quá hạn chót gia hạn (gốc+2 năm)',fmt(qh.length),'mã hết đường gia hạn — NĐ08/2023','var(--warn)'];}
+    kpiCards('ks2',[
       ...(chamKPI?[chamKPI]:[]),
+      ...(ghKPI?[ghKPI]:[]),
+      ['Đáo hạn 12 tháng tới',fmt(Math.round(w12/1000)),(du?fmt1(w12/du*100)+'% dư nợ · ':'')+'nghìn tỷ · áp lực trả nợ','#ef8a3c'],
+      ...(hcKPI?[hcKPI]:[]),
     ]);
     const info=[];if(S.y)info.push('Năm '+S.y);if(S.q)info.push('Quý '+S.q);if(S.m)info.push('Tháng '+S.m);if(S.g)info.push(S.g);
     fs_info.textContent=info.length?'Đang lọc: '+info.join(' · '):'Toàn bộ dữ liệu';
-    donut(document.getElementById('cs_group'),gGroup(ro),document.getElementById('cs_glg'));
+    // maturity wall thay cho donut nhóm (donut trùng với tab Lưu hành — rà 17/07/2026)
+    {const wm={};ro.forEach(r=>{if(!r.dh)return;const y=parseDMY(r.dh).getFullYear();if(y>=2026)wm[y]=(wm[y]||0)+r.gt;});
+     const items=Object.keys(wm).sort().map(y=>({label:String(y),v:Math.round(wm[y])}));
+     barCount(document.getElementById('cs_group'),items,'#ef8a3c','tỷ',v=>fmt(v)+' tỷ đáo hạn');}
     curSumI=ri;curSumB=rb;drawSumCombo();
     document.getElementById('cs_mlg').innerHTML=LG+'<span><i class="dot" style="background:#f2b84b;border-radius:50%"></i>Phát hành ròng</span>';
     renderRange(); renderGrowth();
@@ -1207,11 +1242,13 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
   const setTables=rows=>{TO.set(rows.filter(r=>r.doi!=='tp'));TP.set(rows.filter(r=>r.doi==='tp'));};
   window.renderRating=function(){read();const rows=flt();
     const nInv=rows.filter(r=>isInvestmentGrade(r.kq)).length;
+    // Bỏ "Số đơn vị XHTN" (gần như tĩnh = 6, đã có donut thị phần ngay dưới).
+    // Tham chiếu độ phủ: so số TCPH được XH với số TCPH còn dư nợ (đếm, không map tên).
+    const nOrg=uniq(rows.filter(r=>r.doi!=='tp'),r=>r.dn), nOutDn=uniq(OUT,r=>r.dn);
     kpiCards('kr',[
-      ['Số TCPH được xếp hạng',fmt(uniq(rows.filter(r=>r.doi!=='tp'),r=>r.dn)),fmt(rows.filter(r=>r.doi!=='tp').length)+' kết quả cấp TCPH','#a58bff'],
+      ['Số TCPH được xếp hạng',fmt(nOrg),fmt(rows.filter(r=>r.doi!=='tp').length)+' kết quả · tham chiếu: '+fmt(nOutDn)+' TCPH còn dư nợ','#a58bff'],
+      ['Hạng "đầu tư" (≥ BBB-)',fmt(nInv),(rows.length?fmt1(nInv/rows.length*100)+'% số kết quả · ':'')+fmt(rows.length-nInv)+' hạng đầu cơ','var(--ok)'],
       ['Số trái phiếu được xếp hạng',fmt(rows.filter(r=>r.doi==='tp').length),'kết quả cấp trái phiếu','#5fd0d8'],
-      ['Số đơn vị XHTN',fmt(uniq(rows,r=>r.dv)),'đơn vị xếp hạng'],
-      ['Hạng "đầu tư" (≥ BBB-)',fmt(nInv),fmt(rows.length-nInv)+' hạng đầu cơ','var(--ok)'],
     ]);
     const info=[];if(S.a)info.push(S.a);if(S.g)info.push(S.g);if(S.t)info.push(S.t);
     fr_info.textContent=info.length?'Đang lọc: '+info.join(' · '):'Toàn bộ '+fmt(RR.length)+' kết quả';
@@ -1312,16 +1349,22 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
     const dnoTotal=Object.values(cDno).reduce((a,b)=>a+b,0);
     const dnoGoc=Object.keys(cDno).filter(c=>cTypes[c].has('goc')||cTypes[c].has('ca_hai')).reduce((a,c)=>a+cDno[c],0);
     const totOut=L.kpi.total_out_ty,pct=totOut?dnoTotal/totOut*100:null,pctG=totOut?dnoGoc/totOut*100:null;
+    // Rà 17/07/2026: SỐ NEO là TIỀN (dư nợ chậm), không phải số lượt CBTT (hoạt động công bố).
+    // "Mới 30 ngày" = mã có CBTT chậm trả ĐẦU TIÊN trong 30 ngày gần nhất -> tín hiệu đang xấu đi.
+    if(!window.__lateFirst){const f={};LR.filter(r=>r.loai==='cham_tra').forEach(r=>{const t=parseDMY(r.d).getTime();
+      bondsOf(r).forEach(c=>{if(!(c in f)||t<f[c])f[c]=t;});});window.__lateFirst=f;}
+    const __mx=Math.max(0,...Object.values(window.__lateFirst)), __new30=Object.entries(window.__lateFirst)
+      .filter(([c,t])=>t>=__mx-30*86400000).map(([c])=>c);
     kpiCards('kl',[
-      ['Số lượt CBTT chậm trả',fmt(cham.length),'công bố bất thường','var(--warn)'],
-      ['Số TCPH chậm trả',fmt(uniq(cham,r=>r.dn)),'tổ chức phát hành'],
-      ['Số mã TP chậm trả',fmt(nBonds.size),fmt(Object.keys(cDno).length)+' mã khớp được dư nợ'],
       ['Dư nợ chậm trả',fmt(Math.round(dnoTotal/1000)),(pct!=null?fmt1(pct)+'% tổng dư nợ · ':'')+'nghìn tỷ','var(--warn)'],
       ['Dư nợ chậm trả GỐC',fmt(Math.round(dnoGoc/1000)),(pctG!=null?fmt1(pctG)+'% tổng dư nợ · ':'')+'nghìn tỷ (gốc/cả hai)'],
-      ['Lượt đã thanh toán sau chậm',fmt(cured.length),'khắc phục','var(--ok)'],
+      ['Số mã TP chậm trả',fmt(nBonds.size),fmt(uniq(cham,r=>r.dn))+' TCPH · khớp dư nợ '+fmt(Object.keys(cDno).length)+' mã'],
+      ['Số lượt CBTT chậm trả',fmt(cham.length),'công bố bất thường'],
+      ['Mã chậm mới 30 ngày',fmt(__new30.length),'lần đầu CBTT chậm trong 30 ngày gần nhất',__new30.length?'var(--warn)':''],
     ]);
     const info=[];if(S.y)info.push('Năm '+S.y);if(S.g)info.push(S.g);if(S.t)info.push(loaiLabel(S.t));
-    fl_info.textContent=info.length?'Đang lọc: '+info.join(' · '):'Toàn kỳ '+L.kpi.first+' – '+L.kpi.last;
+    fl_info.textContent=(info.length?'Đang lọc: '+info.join(' · '):'Toàn kỳ '+L.kpi.first+' – '+L.kpi.last)
+      +(cured.length?' · '+fmt(cured.length)+' lượt đã khắc phục':'');
     curRows=rows;drawTime();
     // theo nhóm ngành (đếm lượt chậm trả)
     const sm={};cham.forEach(r=>{sm[r.nhom]=(sm[r.nhom]||0)+1;});
@@ -1410,17 +1453,19 @@ const fillSel=(el,opts,all='Tất cả')=>el.innerHTML=`<option value="">${all}<
     const dno=rows.reduce((a,r)=>a+(r.gt||0),0);
     const nCham=rows.filter(r=>r.cham).length, nMulti=rows.filter(r=>r.n>1).length;
     const nKich=rows.filter(r=>r.sn!=null&&r.sn>=728).length, nQua=rows.filter(r=>r.hcq).length;
+    // Số neo = TIỀN; "lượt CBTT" chuyển xuống badge (sub-tab đã đếm mã). "Đã chuyển thành chậm trả"
+    // = tỷ lệ chuyển đổi của dấu hiệu sớm — theo dõi theo thời gian sẽ thấy sức dự báo của kênh gia hạn.
     kpiCards('kg',[
-      ['Số lượt CBTT gia hạn',fmt(ev.length),'công bố bất thường','var(--warn)'],
-      ['Số mã đã gia hạn',fmt(rows.length),fmt(nMulti)+' mã gia hạn nhiều lần'],
       ['Dư nợ mã đã gia hạn',fmt(Math.round(dno/1000)),'nghìn tỷ VNĐ','var(--warn)'],
+      ['Số mã đã gia hạn',fmt(rows.length),fmt(nMulti)+' mã nhiều lần · '+fmt(uniq(rows,r=>r.dn))+' TCPH'],
       ['Kịch trần 2 năm',fmt(nKich),'hết dư địa gia hạn (NĐ08/2023)','var(--warn)'],
       ['Quá hạn chót pháp lý',fmt(nQua),'phải trả hoặc thành chậm trả','var(--warn)'],
-      ['Kèm chậm trả',fmt(nCham),(rows.length?fmt1(nCham/rows.length*100):0)+'% số mã gia hạn'],
+      ['Đã chuyển thành chậm trả',fmt(nCham),(rows.length?fmt1(nCham/rows.length*100):0)+'% số mã gia hạn'],
     ]);
     const info=[];if(S.y)info.push('Năm '+S.y);if(S.g)info.push(S.g);
     if(S.c)info.push(S.c==='1'?'Có kèm chậm trả':'Chỉ gia hạn');
-    fg_info.textContent=info.length?'Đang lọc: '+info.join(' · '):'Toàn kỳ '+G.kpi.first+' – '+G.kpi.last;
+    fg_info.textContent=(info.length?'Đang lọc: '+info.join(' · '):'Toàn kỳ '+G.kpi.first+' – '+G.kpi.last)
+      +' · '+fmt(ev.length)+' lượt CBTT';
     drawTimeG();
     const sm={};rows.forEach(r=>{sm[r.nhom]=(sm[r.nhom]||0)+(r.gt||0);});
     hbar(document.getElementById('cg_sector'),GROUPS.filter(g=>sm[g]).map(g=>({label:g,v:Math.round(sm[g]),color:gColor[g]})).sort((a,b)=>b.v-a.v),'tỷ');

@@ -643,3 +643,42 @@ VERIFY trên dashboard thật: 0 lỗi JS · mặc định active = "cham" (`lat
 bấm sub-tab gia hạn -> đảo đúng, bảng + biểu đồ render · bấm về -> đúng · computed CSS: active có
 gạch chân `rgb(239,125,51) 2px` + chữ trắng, inactive trong suốt + chữ xám; tab chính radius 12px vs
 sub-tab 0px.
+
+
+## RÀ SOÁT & CHUẨN HOÁ KPI TOÀN DASHBOARD (user yêu cầu "phân tích chuyên sâu", chốt áp toàn bộ — 17/07/2026 v10)
+
+### Chẩn đoán (kiểm kê 44 KPI / 39 card trên 8 tab)
+1. **Trùng lặp 9 chỗ**: GT phát hành / mua lại / dư nợ lặp giữa Tổng hợp và tab riêng; "Số TCPH" ở 4 tab
+   cùng nhãn khác nghĩa; "GT BQ/đợt" ×2 (suy được); "Coupon BQ" ×2 không chú giải khác nhau; "lượt CBTT"
+   trùng badge sub-tab.
+2. **KPI trivia**: Phiên cao nhất · Tổng KL (không so được giữa mã vì mệnh giá khác) · Số phiên ·
+   toàn phần/một phần · Số đơn vị XHTN (=6, tĩnh) · Lượt khắc phục (=5) · Đợt hết hiệu lực (=cờ chất lượng).
+3. **Tab rủi ro đo sai đơn vị**: KPI đầu là "lượt CBTT" (hoạt động) thay vì TIỀN (dư nợ chậm 101 nghìn tỷ).
+4. **Thiếu số đắt giá nhất** (đều tính được từ data đã nhúng): maturity wall 12T (205 nghìn tỷ = 18% dư nợ),
+   % dư nợ khớp VSD (92,5%), vòng quay thứ cấp 12T (1,35× dư nợ), % mua lại/PH cùng kỳ (52,3%).
+   ĐÃ LOẠI 1 ứng viên: "% dư nợ được XHTN" — tên TCPH bảng rating KHÔNG map được sang bảng dư nợ (thử = 0%),
+   cần bảng ánh xạ tên riêng (future work).
+5. Tổng hợp không có khối rủi ro nào; donut "Dư nợ theo nhóm" trùng với tab Lưu hành.
+
+### Nguyên tắc đã áp
+Mỗi số 1 nhà (Tổng hợp là nơi DUY NHẤT lặp số chốt) · mỗi tab ≤5 KPI theo khuôn
+**tiền → đếm (mã/TCPH gộp 1 ô qua sub-label) → chất lượng → tín hiệu riêng** · số phụ xuống sub-label/badge.
+
+### Đã đổi (toàn bộ trong dashboard_template.html, KHÔNG đụng tầng data — mọi KPI mới tính bằng JS)
+| Tab | KPI mới |
+|---|---|
+| Tổng hợp | **2 hàng**: `#ks` thị trường (Dư nợ NEO · PH · ML · Ròng) + **`#ks2` RỦI RO** (Dư nợ chậm 8,9% · Dư nợ gia hạn · **Đáo hạn 12T** · Quá hạn chót gia hạn) — hàng 2 chỉ theo lọc Nhóm |
+| Phát hành | 4: GT · đợt (sub mã) · TCPH · coupon; "hết hiệu lực" -> badge `fi_info` (⚠ 31 đợt · 22 nghìn tỷ) |
+| Mua lại | 4: GT · đợt · TCPH · **Mua lại/PH cùng kỳ 52,3%** (cùng bộ lọc kỳ+nhóm -> so táo với táo) |
+| Lưu hành | 5: Dư nợ · mã (sub TCPH) · coupon dư nợ · kỳ hạn còn lại · **Khớp VSD 92,5% dư nợ** |
+| Thứ cấp | 4: GTGD · BQ/phiên · mã GD (sub ≈72,5% mã lưu hành) · **Vòng quay 12T 135,9%** (cache `window.__turn12`, tính TOÀN thị trường để tử/mẫu cùng phạm vi) |
+| XHTN | 3: TCPH được XH (sub "tham chiếu 272 TCPH còn dư nợ" — GHI TỪ 'tham chiếu' vì 2 tập không map tên được, KHÔNG chia %) · hạng đầu tư (sub %) · TP được XH |
+| Chậm trả | 5: **Dư nợ chậm NEO** · GỐC · mã (sub TCPH+khớp) · lượt CBTT · **Mã chậm MỚI 30 ngày** (`window.__lateFirst` = ngày CBTT chậm ĐẦU TIÊN mỗi mã); khắc phục -> badge |
+| Gia hạn | 5: Dư nợ NEO · mã (sub nhiều lần+TCPH) · kịch trần · quá hạn chót · **Đã chuyển thành chậm trả 4,0%** (đổi tên từ "kèm" — đây là TỶ LỆ CHUYỂN ĐỔI của dấu hiệu sớm); lượt CBTT -> badge `fg_info` |
+
+**Biểu đồ**: donut "Dư nợ theo nhóm" ở Tổng hợp -> **maturity wall theo năm đáo hạn** (barCount, `#cs_group`,
+legend `cs_glg` display:none); cơ cấu nhóm vẫn còn ở tab Lưu hành (ghi chú dẫn link trong `.cs`).
+
+VERIFY toàn bộ trên browser: 0 lỗi JS · 8 tab KPI đúng số (đối chiếu tay: 1.325/2.533=52,3% ✓, vòng quay
+135,9% = số đã tính offline ✓, khớp VSD 92,5% ✓) · badge 3 tab hiện đủ · lọc Nhóm ở Tổng hợp đổi cả hàng
+rủi ro lẫn maturity wall (BĐS: đáo hạn 12T = **31% dư nợ nhóm** vs 18% toàn thị trường — insight lộ ra ngay).
