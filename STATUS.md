@@ -237,3 +237,77 @@ Thanh khoản tăng đều theo năm: 2023 (½ năm) 1,948 → 2024 4,337 → 20
 Ổ **C: đầy 100%** → `build_reports.py` lỗi `OSError: No space left` khi openpyxl ghi Excel (dùng TMP trên C:).
 Dữ liệu không đổi nên chỉ cần rebuild `dashboard.html` (nhúng thẳng `dashboard_data.json` vào template,
 ghi ra E:, không qua TMP). Muốn chạy lại full pipeline/Excel: dọn ổ C: hoặc đặt `TMP=E:\...\tmp` trước khi chạy.
+
+
+---
+
+# NGUỒN THỨ 2: VSD (VSDC) — ĐỐI CHIẾU CHÉO VỚI HNX (17/07/2026)
+
+## Scraper `vsd_bond_scraper.py` -> `vsd_bond_raw.csv` / `.json`
+Nguồn: `https://www.vsd.vn/vi/ibl` ("Công cụ nợ và trái phiếu doanh nghiệp"). **2.332 mã TPDN riêng lẻ**.
+Cơ chế GIỐNG pattern HNX nhưng khác tên header: GET `/vi/ibl` -> `meta[name="__VPToken"]`
+-> POST `/vi/ibl/search` (JSON) kèm header `__VPToken`. Trả HTML mảnh. `VERIFY_SSL=True` (VSD cert OK, khác HNX).
+Body: `{SearchKey, CurrentPage, RecordOnPage, OrderBy, OrderType}`; SearchKey = **11 trường** ngăn `|`:
+`issuerId|code|stockType|sanGiaoDich|status|lang|kyHan|namPhatHanh|namDaoHan|tenTCPH|typeIsuStock`
+- `stockType` cố định `"2,4"` (theo JS trang); `lang=VI`; **`typeIsuStock=7` = TPDN riêng lẻ** (1=TPCP, 5=TPDN ra công chúng...).
+- **BẪY: server BỎ QUA `RecordOnPage`>10** -> luôn 10 dòng/trang -> 234 trang (đừng phí công thử page size lớn).
+
+2 giai đoạn: (1) LIST 234 trang; (2) **DETAIL** `GET /vi/s-detail/<id>` từng mã, 8 luồng, ~12 phút.
+Detail cho thứ list KHÔNG có: **mệnh giá, tổng giá trị ĐK, lãi suất, cách trả lãi, Giấy CNĐKCK, và mã CBTT**.
+Chạy `--no-detail` để bỏ giai đoạn 2 (nhanh nhưng mất mệnh giá/giá trị).
+
+**Bóc mã CBTT** (`extract_ma_cbtt`, hàm dùng chung — đừng viết lại inline): tên CK VSD có 4 dạng:
+`... (BIDLH2331010)` trong ngoặc | `Trái phiếu VHMB2426004` trần | `Trái phiếu STA12601` = **chỉ mã GD, KHÔNG phải CBTT**
+| chỉ tên DN (không mã). Được **1.596/2.332** mã có mã CBTT riêng.
+
+**KIỂM CHỨNG PARSER**: chân trang VSD tự công bố tổng -> `parse_summary()` lưu vào JSON.
+Đã đối chiếu KHỚP TUYỆT ĐỐI: 2.332 mã / 1.595 hiệu lực / 737 hủy / 2.257.150.836 TP.
+⚠ Nhãn VSD ghi "Tổng số lượng chứng khoán **đang lưu hành**" nhưng thực chất = tổng **TẤT CẢ** (gồm cả mã đã hủy);
+chỉ mã hiệu lực = 742.759.208. Đừng trích nhãn này ra báo cáo.
+
+## Đối chiếu `vsd_vs_hnx_compare.py` -> `VSD_vs_HNX_DoiChieu.xlsx` (8 sheet)
+Hai nguồn ĐO HAI THỨ KHÁC NHAU -> mục tiêu là **giải thích** chênh, không ép khớp 100%:
+VSD = **đăng ký lưu ký** tại VSDC | HNX catalog = **đăng ký giao dịch** sàn TPRL | HNX issuance = CBTT phát hành.
+
+Khóa nối: **ISIN -> mã CBTT -> mã GD** (2.168/2.332 khớp, 100% qua ISIN).
+⚠ **BẪY ĐÃ MẮC PHẢI**: TP phát hành gần đây có **mã CBTT TRÙNG mã GD** (ABB12501, P5332601) — nếu chỉ nối bằng
+`ma_cbtt` đã bóc (bỏ dạng 3) thì báo nhầm 1.570 mã "HNX có, VSD không có"; đúng ra phải thử **CẢ `cbtt_k` LẪN `gd_k`**
+-> còn 855.
+
+### KẾT QUẢ (17/07/2026)
+**Mức độ đồng thuận rất cao**: trên **1.400 mã cả hai nguồn đều nói còn hiệu lực**, **1.390 mã (99,3%) khớp
+CHÍNH XÁC tới từng đồng**, mệnh giá lệch **0 mã**; tổng 1.229,7 vs 1.226,6 nghìn tỷ (**+0,26%**).
+=> Hai hệ thống độc lập xác nhận lẫn nhau; dữ liệu HNX của dự án đáng tin.
+
+**CẦU NỐI** giải thích trọn vẹn chênh 1.394,0 (VSD hiệu lực) vs 1.235,3 (HNX ĐKGD) nghìn tỷ — A+B+D = VSD; A+C+E = HNX:
+| | Nhóm | Số mã | Nghìn tỷ |
+|-|------|------:|---------:|
+|A| Cả 2 còn hiệu lực | 1.400 | 1.229,7 (HNX 1.226,6) |
+|B| (−) VSD hiệu lực, HNX đã hủy ĐKGD | 103 | 70,2 |
+|D| (−) Chỉ có ở VSD | 92 | 94,1 |
+|C| (+) VSD hủy, HNX còn ĐKGD | 0 | 0,0 |
+|E| (+) Chỉ có ở HNX, đang ĐKGD | 5 | 8,7 |
+**Bản chất**: hủy ĐKGD (rời sàn) ≠ hủy lưu ký -> VSD giữ, HNX cho KL ĐKGD = 0. Nhóm D = TP mới 2026 chưa kịp
+ĐKGD (30 mã) + TP cũ 2006–2021 trước thời kỳ ĐKGD.
+
+**855 mã CBTT HNX không thấy ở VSD** — phần lớn là BÌNH THƯỜNG: 674 đã đáo hạn (VSD gỡ khỏi danh sách)
++ 140 đã mua lại hết trước hạn. **Chỉ 41 mã / 43,4 nghìn tỷ là khoảng trống thật** (chưa đáo hạn & còn dư nợ):
+2 nhóm — (a) mới phát hành 06/2026, độ trễ đăng ký lưu ký (STB12602–05, ASP12601);
+(b) **TCPH có vấn đề**: BSECH2126003 Bông Sen 4.800 tỷ, NTDCH2227001 Nova Thảo Điền 2.300 tỷ, VTPCH2126003/4/5.
+
+**BẤT THƯỜNG NGUỒN đáng chú ý**: `VHA32105` (Thương mại - Quảng cáo - Xây dựng Việt Hân) — VSD ghi
+**420.860 TP = 4.208,6 tỷ**, HNX ghi **42.086 TP = 420,86 tỷ**, mà CBTT phát hành chỉ **500 tỷ**
+-> **VSD lệch 10× và vượt xa lượng phát hành** => nghiêng về lỗi dữ liệu phía VSD. Đây là 1 trong 10 mã ở
+sheet "Lệch SL-GT (cùng hiệu lực)" — sheet này CHỈ gồm mã cả 2 nguồn còn hiệu lực nên chênh = bất thường THẬT.
+
+### Sheet trong `VSD_vs_HNX_DoiChieu.xlsx`
+`Tổng quan` · `Cầu nối chênh lệch` · `Lệch SL-GT (cùng hiệu lực)` (10) · `Lệch trạng thái` (103) ·
+`Lệch ngày PH-ĐH` (78, mã nhiều đợt lệch là bình thường do CBTT gộp) · `Chỉ có ở VSD` (164) ·
+`Chỉ có ở HNX (ĐKGD)` (5) · `CBTT HNX thiếu ở VSD` (855, lọc cột "Phân loại").
+
+### Chạy lại
+```
+python vsd_bond_scraper.py          # ~12 phút (list 234 trang + detail 2.332 mã)
+python vsd_vs_hnx_compare.py        # cần bond_catalog/issuance/buyback_raw.csv sẵn
+```
+CHƯA nối vào `update_daily.py` và CHƯA lên dashboard — cần user quyết có đưa thành tab thứ 9 không.
