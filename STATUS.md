@@ -311,3 +311,63 @@ python vsd_bond_scraper.py          # ~12 phút (list 234 trang + detail 2.332 m
 python vsd_vs_hnx_compare.py        # cần bond_catalog/issuance/buyback_raw.csv sẵn
 ```
 CHƯA nối vào `update_daily.py` và CHƯA lên dashboard — cần user quyết có đưa thành tab thứ 9 không.
+
+
+## VÒNG ĐỜI 2 NGUỒN — `vsd_hnx_lifecycle.py` -> `VSD_HNX_VongDoi.xlsx` (17/07/2026)
+
+**MÔ HÌNH NGHIỆP VỤ (user chốt 17/07/2026)** — nền tảng để đọc mọi chênh lệch VSD↔HNX:
+> Phát hành → **CBTT trên HNX trước** → đăng ký **lưu ký VSD** → xong mới quay lại **ĐKGD/niêm yết HNX**.
+> Khi kết thúc (thường trước đáo hạn / trước mua lại): **hủy ĐKGD trên HNX TRƯỚC** → **hủy lưu ký VSD SAU**.
+> Độ trễ mỗi khâu ~**2 tuần - 1 tháng**.
+=> Chênh lệch giữa 2 nguồn phần lớn KHÔNG phải sai số, mà là **độ trễ vòng đời**. Mã nằm ngoài cửa sổ
+quá lâu mới là bất thường. Đây là lăng kính đúng để đọc `VSD_vs_HNX_DoiChieu.xlsx`.
+
+### Mô hình được dữ liệu XÁC NHẬN
+| Khâu | TP phát hành từ 2024 (n=1.090) |
+|------|-------------------------------|
+| 1. PH → đăng ký lưu ký VSD | trung vị **15 ngày** (IQR 13–21; 87,1% ≤ 30 ngày) |
+| 2. lưu ký VSD → ĐKGD HNX | trung vị **16 ngày** (IQR 13–22; 87,4% ≤ 30 ngày) |
+| Tổng PH → lên sàn TPRL | trung vị **34 ngày** |
+
+**Quy trình NHANH DẦN theo năm PH** (khâu 1 / khâu 2, trung vị ngày):
+2023: 29/25 · 2024: 18/17 · 2025: 14/17 · 2026: **15/13**.
+
+**Chiều nghịch xác nhận thứ tự**: mã "VSD đã hủy nhưng HNX còn ĐKGD" = **0/2.332** → HNX LUÔN hủy trước.
+(Trước khi biết mô hình, nhóm C=0 là kết quả chưa lý giải được; giờ nó là bằng chứng khẳng định.)
+
+⚠ **BẪY ĐO LƯỜNG QUAN TRỌNG**: nếu gộp cả TP cũ, khâu 1 trung vị = **27 ngày nhưng IQR 15–528**
+(TP 2021-2022 bị đăng ký **HỒI TỐ** 2023 sau NĐ65 + sàn TPRL mở 19/07/2023). **Chỉ đo TP phát hành TỪ 2024**
+(hằng số `DO_SACH_TU`). Đừng trích số "toàn bộ" ra báo cáo.
+
+### Ngày lưu ký lấy ở đâu
+`ngay_gcn` = ngày cấp Giấy CNĐKCK (trang chi tiết VSD) = **ngày đăng ký lưu ký**; VSD **KHÔNG công bố
+ngày HỦY lưu ký** (tab 2 "Thông tin đăng ký chứng khoán" chỉ ghi các lần ĐK, không ghi hủy)
+=> khâu 4 chỉ đo được dạng **"đang treo" (right-censored)**.
+🐛 **BUG ĐÃ SỬA**: VSD viết ngày kiểu **`25/7/2025` (tháng 1 chữ số)** và 3 cách diễn đạt
+("cấp lần đầu ngày" / "cấp ngày" / "ngày") -> regex `\d{2}/\d{2}/\d{4}` chỉ bóc được 1.231/2.332.
+`extract_gcn_date()` neo vào chữ "ngày" + `\d{1,2}` -> **2.282/2.332** (n mẫu khâu 1 nhảy 174 -> 1.090).
+
+### Phát hiện: mã NGOÀI cửa sổ (2 nhóm cần rà soát)
+1. **ĐANG TREO** (HNX đã hủy ĐKGD, VSD còn "Hiệu lực"): 103 mã / 70,2 nghìn tỷ. **Chỉ 12/94 mã trong cửa
+   sổ 30 ngày**; trung vị treo **232 ngày**, max 942 (NCR12101 GD cuối 18/12/2023). >1 năm: 37 mã/23,0 nghìn tỷ.
+   => Độ trễ hủy lưu ký THỰC TẾ dài hơn nhiều mức 2 tuần-1 tháng.
+2. **VSD "Hiệu lực" dù ĐÃ QUÁ ĐÁO HẠN**: 101 mã / 63,6 nghìn tỷ, quá hạn trung vị **494 ngày** (max 964).
+   **Tỷ lệ có CBTT chậm trả = 30,7% vs nền 3,2% -> cao gấp 9,6 lần** (đối chiếu `bond_latepay_raw.csv`).
+   Tách: 31 mã/19,1 nghìn tỷ đã xác nhận chậm trả · **70 mã/44,5 nghìn tỷ CHƯA rõ lý do = DANH SÁCH THEO DÕI**
+   (VSD chậm cập nhật HOẶC chậm trả chưa CBTT — vd GHI12101 Golden Hill 5.760 tỷ ĐH 15/04/2024).
+   ⚠ Diễn đạt cho đúng: KHÔNG kết luận cả nhóm là chậm trả (chỉ ~1/3 có CBTT xác nhận).
+
+### Hệ quả: VSD "Hiệu lực" KHÔNG phải thước đo dư nợ
+`1.394,0` nghìn tỷ (VSD hiệu lực) **gồm 63,6 nghìn tỷ đã quá đáo hạn**; loại ra còn `1.330,5`.
+So: HNX đang ĐKGD `1.235,3` | dự án (PH − mua lại − đáo hạn) `~1.137`. **Vẫn dùng cách đo của dự án**;
+VSD dùng để ĐỐI CHIẾU và làm TÍN HIỆU RỦI RO, không thay thế.
+
+🐛 **BUG PANDAS ĐÃ MẮC — CẢNH BÁO**: `cat` có **5 dòng ISIN RỖNG**; `vj.join(ci, on='join_isin')` khi vj
+còn 164 dòng `join_isin=''` -> **nhân bản chéo** (2.332 -> 2.988 dòng, thừa 656) làm 101 mã quá hạn phình
+thành 237 và gán nhầm mã CBTT (SNL12101 -> VIC12510!). **LUÔN lọc `join_isin != ''` TRƯỚC khi join.**
+`vsd_vs_hnx_compare.py` và `vsd_hnx_lifecycle.py` đã lọc đúng; script thăm dò ad-hoc thì phải nhớ.
+
+### Chạy
+```
+python vsd_hnx_lifecycle.py     # cần vsd_bond_raw.csv (có cột ngay_gcn) + bond_catalog/issuance/latepay_raw.csv
+```

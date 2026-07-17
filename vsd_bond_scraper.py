@@ -61,7 +61,8 @@ HEADERS = {
 LIST_COLUMNS = ["stt", "ma_ck", "isin", "ten_tcdkck", "ky_han",
                 "ngay_phat_hanh", "ngay_dao_han", "so_luong", "tinh_trang"]
 DETAIL_COLUMNS = ["ma_cbtt", "ten_ck", "menh_gia", "tong_so_dk", "gia_tri_dk",
-                  "lai_suat", "hinh_thuc_ph", "noi_gd", "giay_cnck", "cach_tra_lai"]
+                  "lai_suat", "hinh_thuc_ph", "noi_gd", "giay_cnck", "ngay_gcn",
+                  "cach_tra_lai"]
 COLUMNS = LIST_COLUMNS + DETAIL_COLUMNS + ["detail_id", "issuer_id"]
 
 
@@ -186,6 +187,19 @@ def _num(s):
 
 
 _CODE = r"[A-Z][A-Z0-9_.\-]{5,}"
+# "Số: 442/2023/GCNTPRL-VSDC do VSDC cấp lần đầu ngày 13/10/2023" | "số 235/2025/... ngày 25/7/2025"
+# | "Số 332/2024/... do VSDC cấp ngày 19/09/2024"  -> ngày có thể 1 hoặc 2 chữ số => \d{1,2}
+_GCN_DATE = re.compile(r"ngày\s*(\d{1,2}/\d{1,2}/\d{4})")
+
+
+def extract_gcn_date(giay_cnck):
+    """Ngày cấp Giấy CNĐKCK = NGÀY ĐĂNG KÝ LƯU KÝ tại VSDC -> chuẩn hoá dd/mm/yyyy.
+    Neo vào chữ 'ngày' để không dính số hiệu GCN ('235/2025/GCNTPRL-VSDC')."""
+    m = _GCN_DATE.search(giay_cnck or "")
+    if not m:
+        return ""
+    d, mo, y = m.group(1).split("/")
+    return f"{int(d):02d}/{int(mo):02d}/{y}"
 
 
 def extract_ma_cbtt(ten_ck, ma_ck=""):
@@ -219,6 +233,7 @@ def parse_detail(html):
         if label and label not in kv:
             kv[label] = value
     ten_ck = kv.get("Tên chứng khoán", "")
+    gcn = re.sub(r"\s+", " ", kv.get("Giấy chứng nhận ĐKCK", ""))
     return {
         "ma_cbtt": extract_ma_cbtt(ten_ck, kv.get("Mã chứng khoán", "")),
         "ten_ck": ten_ck,
@@ -228,7 +243,8 @@ def parse_detail(html):
         "lai_suat": kv.get("Lãi suất", ""),
         "hinh_thuc_ph": kv.get("Hình thức phát hành", ""),
         "noi_gd": kv.get("Nơi giao dịch (*)", "") or kv.get("Nơi giao dịch", ""),
-        "giay_cnck": re.sub(r"\s+", " ", kv.get("Giấy chứng nhận ĐKCK", "")),
+        "giay_cnck": gcn,
+        "ngay_gcn": extract_gcn_date(gcn),
         "cach_tra_lai": kv.get("Cách thức trả lãi", ""),
     }
 
