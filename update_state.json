@@ -1,0 +1,81 @@
+{
+ "last_run": "17/07/2026 16:30",
+ "rebuild_ok": true,
+ "n_changes": 2,
+ "n_new_latepay": 0,
+ "new_latepay": [],
+ "sources": [
+  {
+   "name": "Phát hành",
+   "ok": true,
+   "count": 3246,
+   "prev": 3246,
+   "delta": 0,
+   "guard": false,
+   "note": ""
+  },
+  {
+   "name": "Mua lại",
+   "ok": true,
+   "count": 6174,
+   "prev": 6174,
+   "delta": 0,
+   "guard": false,
+   "note": ""
+  },
+  {
+   "name": "Danh mục",
+   "ok": true,
+   "count": 2182,
+   "prev": 2180,
+   "delta": 2,
+   "guard": false,
+   "note": ""
+  },
+  {
+   "name": "Xếp hạng",
+   "ok": true,
+   "count": 148,
+   "prev": 148,
+   "delta": 0,
+   "guard": false,
+   "note": ""
+  },
+  {
+   "name": "Chậm trả",
+   "ok": true,
+   "count": 2223,
+   "prev": 2223,
+   "delta": 0,
+   "guard": false,
+   "note": ""
+  },
+  {
+   "name": "Ngành ICB",
+   "ok": true,
+   "count": 2089,
+   "prev": 2089,
+   "delta": 0,
+   "guard": false,
+   "note": ""
+  },
+  {
+   "name": "Lưu ký VSD",
+   "ok": true,
+   "count": 2332,
+   "prev": 2332,
+   "delta": 0,
+   "guard": false,
+   "note": ""
+  },
+  {
+   "name": "GD thứ cấp",
+   "ok": true,
+   "count": 71042,
+   "prev": 71042,
+   "delta": 0,
+   "guard": false,
+   "note": ""
+  }
+ ]
+}

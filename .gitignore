@@ -1,16 +1,10 @@
-# === Dữ liệu thô scrape (tái tạo được bằng các *_scraper.py) ===
-*_raw.csv
-*_raw.json
+# === 17/07/2026: user chốt commit CẢ DỮ LIỆU lên GitHub ===
+# (trước đây ignore *_raw.csv/json + *.xlsx vì "tái tạo được"; nay theo dõi luôn để repo tự đủ:
+#  clone về là có ngay data + dashboard, không phải chạy scraper 30-40 phút)
 
-# === File sinh khi chạy / log / trạng thái ===
-update_state.json
+# === File sinh khi chạy / tạm ===
 update_log.txt
-changes_log.csv
-alerts_new_latepay.csv
 *.prev
-
-# === Excel xuất (nặng, tái tạo bằng build_reports.py) ===
-*.xlsx
 
 # === Python cache & thư mục nháp ===
 __pycache__/
@@ -26,5 +20,6 @@ Thumbs.db
 .vscode/
 .idea/
 
-# GIỮ (không ignore): *.py, *.ps1, run_update.bat, dashboard_template.html,
-#   dashboard.html, dashboard_data.json, STATUS.md, README.md, .gitignore
+# GIỮ (được theo dõi): *.py, *.ps1, run_update.bat, dashboard_template.html, dashboard.html,
+#   dashboard_data.json, *_raw.csv, *_raw.json, *.xlsx, update_state.json, changes_log.csv,
+#   alerts_new_latepay.csv, STATUS.md, README.md
