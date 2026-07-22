@@ -1,5 +1,5 @@
 {
- "last_run": "17/07/2026 16:30",
+ "last_run": "22/07/2026 16:30",
  "rebuild_ok": true,
  "n_changes": 2,
  "n_new_latepay": 0,
@@ -8,8 +8,8 @@
   {
    "name": "Phát hành",
    "ok": true,
-   "count": 3246,
-   "prev": 3246,
+   "count": 3124,
+   "prev": 3124,
    "delta": 0,
    "guard": false,
    "note": ""
@@ -17,8 +17,8 @@
   {
    "name": "Mua lại",
    "ok": true,
-   "count": 6174,
-   "prev": 6174,
+   "count": 6180,
+   "prev": 6180,
    "delta": 0,
    "guard": false,
    "note": ""
@@ -26,9 +26,18 @@
   {
    "name": "Danh mục",
    "ok": true,
-   "count": 2182,
-   "prev": 2180,
-   "delta": 2,
+   "count": 2198,
+   "prev": 2198,
+   "delta": 0,
+   "guard": false,
+   "note": ""
+  },
+  {
+   "name": "DS trái phiếu",
+   "ok": true,
+   "count": 6795,
+   "prev": 6795,
+   "delta": 0,
    "guard": false,
    "note": ""
   },
@@ -44,9 +53,18 @@
   {
    "name": "Chậm trả",
    "ok": true,
-   "count": 2223,
-   "prev": 2223,
+   "count": 2229,
+   "prev": 2229,
    "delta": 0,
+   "guard": false,
+   "note": ""
+  },
+  {
+   "name": "Tin khác",
+   "ok": true,
+   "count": 726,
+   "prev": 725,
+   "delta": 1,
    "guard": false,
    "note": ""
   },
@@ -62,8 +80,8 @@
   {
    "name": "Lưu ký VSD",
    "ok": true,
-   "count": 2332,
-   "prev": 2332,
+   "count": 2340,
+   "prev": 2340,
    "delta": 0,
    "guard": false,
    "note": ""
@@ -71,8 +89,8 @@
   {
    "name": "GD thứ cấp",
    "ok": true,
-   "count": 71042,
-   "prev": 71042,
+   "count": 71410,
+   "prev": 71410,
    "delta": 0,
    "guard": false,
    "note": ""

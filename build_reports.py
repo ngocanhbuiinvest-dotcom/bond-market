@@ -29,6 +29,18 @@ XLSX = "TPDN_PhatHanh_TrongNuoc.xlsx"
 TY = 1e9  # 1 tỷ đồng
 
 
+def sanitize_nan(o):
+    """NaN/Infinity -> None đệ quy. JSON chuẩn không có NaN; nếu để lọt, dashboard nhúng
+    `const DATA={...}` sẽ đọc thành số NaN và làm hỏng thang đo mọi biểu đồ dùng Math.max."""
+    if isinstance(o, dict):
+        return {k: sanitize_nan(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [sanitize_nan(v) for v in o]
+    if isinstance(o, float) and (o != o or o in (float("inf"), float("-inf"))):
+        return None
+    return o
+
+
 # ---------- phân loại nhóm tổ chức phát hành ----------
 # classify() import từ sector_map (14 nhóm: gán tay DN lớn + từ khóa).
 
@@ -80,7 +92,13 @@ def load():
     print(f"Gộp trùng công bố: {n0} -> {len(df)} đợt phát hành ({df['ma_tp'].nunique()} mã TP)")
     df["nam"] = df["ph_date"].dt.year
     df["thang"] = df["ph_date"].dt.to_period("M").astype(str)
-    df["gia_tri_ty"] = df["gia_tri_phat_hanh"] / TY
+    # HNX có đợt công bố khối lượng = 0 -> gia_tri_phat_hanh rỗng. Bắt buộc coerce về 0:
+    # để NaN thì nó lọt vào dashboard_data.json và làm NaN cả thang đo chart (chart trắng trơn).
+    _gt_raw = pd.to_numeric(df["gia_tri_phat_hanh"], errors="coerce")
+    _n_missing = int(_gt_raw.isna().sum())
+    if _n_missing:
+        print(f"CẢNH BÁO: {_n_missing} đợt phát hành không có giá trị (khối lượng = 0) -> tính = 0 tỷ")
+    df["gia_tri_ty"] = _gt_raw.fillna(0.0) / TY
     _src = df["ten_dn"].apply(classify_with_source)
     df["nhom"] = _src.apply(lambda t: t[0])
     df["nhom_src"] = _src.apply(lambda t: t[1])   # nguồn ngành: Override / VietCap ICB / Từ khóa / Khác
@@ -427,7 +445,38 @@ def outstanding_by_bond(df, bb):
     return dno
 
 
-def load_latepay(dno_map=None, total_out_ty=None):
+NEWSRAW = "bond_news_raw.csv"
+
+
+def load_news():
+    """Tab "TIN KHÁC" của trang Công bố thông tin (bond_news_scraper.py).
+
+    LÝ DO CÓ MODULE NÀY (khảo sát 22/07/2026): doanh nghiệp công bố việc ĐÃ TRẢ NỢ ở tab
+    "Tin khác", KHÔNG phải tab "Tin bất thường" mà ta vẫn quét -> dashboard chỉ thấy 5 lượt
+    khắc phục trong khi thực tế có ~90, và 33 mã bị treo trạng thái "đang chậm trả" oan.
+
+    Trả {"cure": {mã: {d, td, loai, dt}}} — với mỗi mã giữ sự kiện thanh toán MỚI NHẤT.
+    Không xét ở đây việc sự kiện có sau lần chậm trả cuối hay không: so sánh ngày thuộc về
+    nơi dựng danh sách chậm trả (dashboard), vì danh sách đó còn chịu bộ lọc thời gian.
+    """
+    if not os.path.exists(NEWSRAW):
+        return None
+    nw = pd.read_csv(NEWSRAW, dtype=str).fillna("")
+    nw["dt"] = pd.to_datetime(nw["ngay_dang_tin"], format="%d/%m/%Y", errors="coerce")
+    nw = nw.dropna(subset=["dt"]).sort_values("dt")
+    cure = {}
+    # tt_bo_sung = trả BỔ SUNG phần còn thiếu -> khắc phục MỘT PHẦN, KHÔNG kết luận hết chậm;
+    # giữ riêng loại để dashboard hiển thị đúng mức độ, không gộp chung với 'khac_phuc'.
+    for x in nw[nw["loai_su_kien"].isin(["khac_phuc", "tt_bo_sung", "tat_toan"])].itertuples(index=False):
+        for c in _split_codes(x.ma_tp):
+            cure[c] = {"d": x.ngay_dang_tin, "td": x.tieu_de, "loai": x.loai_su_kien}
+    n_by = pd.Series([v["loai"] for v in cure.values()]).value_counts().to_dict() if cure else {}
+    print(f"Tin khác: {len(nw)} tin · {len(cure)} mã có CBTT đã thanh toán "
+          + " · ".join(f"{k} {v}" for k, v in n_by.items()))
+    return {"cure": cure, "n_tin": int(len(nw))}
+
+
+def load_latepay(dno_map=None, total_out_ty=None, news=None):
     """Đọc TIN BẤT THƯỜNG (bond_latepay_raw.csv), chỉ giữ sự kiện chậm trả/khắc phục -> block dashboard.
        rows cấp CBTT (+ loại chậm gốc/lãi/cả hai) + nhóm ngành + dư nợ theo mã + KPI (gồm % dư nợ chậm/tổng).
        Trả None nếu chưa có file / không có sự kiện chậm trả."""
@@ -468,11 +517,16 @@ def load_latepay(dno_map=None, total_out_ty=None):
            "pct_goc": (round(dno_goc / total_out_ty * 100, 2) if total_out_ty else None),
            "first": (f"{cham['dt'].min():%d/%m/%Y}" if len(cham) else ""),
            "last": (f"{cham['dt'].max():%d/%m/%Y}" if len(cham) else "")}
+    # KÊNH KHẮC PHỤC THỨ HAI (tab "Tin khác") — chỉ giữ mã THỰC SỰ nằm trong danh sách chậm
+    # trả, khỏi đẩy sang dashboard 183 mã không liên quan.
+    cure = {c: v for c, v in ((news or {}).get("cure") or {}).items() if c in code_types}
+    kpi["n_cure_news"] = len(cure)
     print(f"Chậm trả gốc/lãi: {kpi['n_events']} lượt · {kpi['n_dn']} TCPH · {kpi['n_ma']} mã "
           f"(khớp dư nợ {kpi['n_ma_dno']}) · dư nợ chậm {dno_total:,.0f} tỷ"
           + (f" = {kpi['pct_total']}% tổng dư nợ" if kpi["pct_total"] else "")
-          + f" · {kpi['n_cured']} khắc phục")
-    return {"rows": rows, "kpi": kpi, "dno": code_dno}
+          + f" · {kpi['n_cured']} khắc phục (Tin bất thường)"
+          + (f" + {len(cure)} mã có CBTT đã trả ở Tin khác" if cure else ""))
+    return {"rows": rows, "kpi": kpi, "dno": code_dno, "cure": cure}
 
 
 def load_giahan(out=None):
@@ -498,6 +552,22 @@ def load_giahan(out=None):
     for s in lp[lp["loai_su_kien"] == "cham_tra"]["ma_tp"]:
         cham_codes.update(c.upper() for c in _split_codes(s))
 
+    # CHUỖI CẢNH BÁO 3 TẦNG (bổ sung 22/07/2026): luật buộc lấy ý kiến / họp người sở hữu
+    # trái phiếu TRƯỚC khi gia hạn, mà gia hạn lại thường đi TRƯỚC chậm trả. Mốc "xin ý kiến"
+    # vì thế là mắt xích SỚM NHẤT quan sát được của chuỗi tái cơ cấu nợ:
+    #     xin ý kiến trái chủ  ->  gia hạn / đổi điều khoản  ->  chậm trả
+    # Dữ liệu nằm sẵn trong 1.250 tin bất thường trước đây bỏ trống, không tốn thêm request.
+    yk = lp[lp["loai_su_kien"] == "y_kien_trai_chu"].copy()
+    yk["dt"] = pd.to_datetime(yk["ngay_dang_tin"], format="%d/%m/%Y", errors="coerce")
+    yk = yk.dropna(subset=["dt"]).sort_values("dt")
+    yk_first = {}                                  # mã -> LẦN ĐẦU xin ý kiến
+    for x in yk.itertuples(index=False):
+        for c in _split_codes(x.ma_tp):
+            yk_first.setdefault(c.upper(), x.ngay_dang_tin)
+    xp_codes = set()                               # mã của TCPH bị xử phạt hành chính
+    for s in lp[lp["loai_su_kien"] == "xu_phat"]["ma_tp"]:
+        xp_codes.update(c.upper() for c in _split_codes(s))
+
     # thông tin cấp mã từ bảng dư nợ (dư nợ, TCPH, nhóm, ĐH hiện hành, nguồn ĐH)
     info = {}
     if out is not None:
@@ -515,7 +585,8 @@ def load_giahan(out=None):
     for x in gh.itertuples(index=False):
         for c in _split_codes(x.ma_tp):
             k = c.upper()
-            a = agg.setdefault(k, {"ma": c, "n": 0, "lan_cuoi": "", "dn_cbtt": x.ten_dn})
+            a = agg.setdefault(k, {"ma": c, "n": 0, "lan_dau": x.ngay_dang_tin,
+                                   "lan_cuoi": "", "dn_cbtt": x.ten_dn})
             a["n"] += 1
             a["lan_cuoi"] = x.ngay_dang_tin          # đã sort theo ngày -> giữ bản cuối
     today = pd.Timestamp(datetime.now().date())
@@ -535,7 +606,13 @@ def load_giahan(out=None):
                      "sn": (int((dm - dg).days) if (dm is not None and dg is not None) else None),
                      "hc": (hc.strftime("%d/%m/%Y") if hc is not None else ""),
                      "hcq": (bool(hc < today) if hc is not None else None),   # hạn chót đã qua?
-                     "tt": i.get("tt", ""), "cham": (k in cham_codes)})
+                     "tt": i.get("tt", ""), "cham": (k in cham_codes),
+                     "yk": yk_first.get(k, ""),          # ngày xin ý kiến trái chủ LẦN ĐẦU
+                     # số ngày từ khi xin ý kiến đến khi CBTT gia hạn -> đo "báo trước bao lâu"
+                     "yks": ((pd.to_datetime(a["lan_dau"], format="%d/%m/%Y", errors="coerce")
+                              - pd.to_datetime(yk_first[k], format="%d/%m/%Y", errors="coerce")).days
+                             if k in yk_first else None),
+                     "xp": (k in xp_codes)})
     rows.sort(key=lambda r: (-(r["gt"] or 0), -r["n"]))
 
     n_dn = len({r["dn"] for r in rows})
@@ -544,15 +621,24 @@ def load_giahan(out=None):
     n_moi = sum(1 for r in rows if r["dhm"])
     n_qua = sum(1 for r in rows if r["hcq"])
     n_kich = sum(1 for r in rows if r["sn"] and r["sn"] >= 728)
+    n_yk = sum(1 for r in rows if r["yk"])
+    n_xp = sum(1 for r in rows if r["xp"])
+    _lead = [r["yks"] for r in rows if r["yks"] is not None and r["yks"] >= 0]
+    lead_med = int(pd.Series(_lead).median()) if _lead else None
     kpi = {"n_events": int(len(gh)), "n_ma": len(rows), "n_dn": n_dn, "dno": dno,
            "n_cham": n_cham, "n_nhieu_lan": sum(1 for r in rows if r["n"] > 1),
            "n_moi": n_moi, "n_qua_hanchot": n_qua, "n_kich_tran": n_kich,
            "pct_cham": (round(n_cham / len(rows) * 100, 1) if rows else 0),
+           "n_yk": n_yk, "n_xp": n_xp, "lead_med": lead_med,
+           "n_yk_events": int(len(yk)),
            "first": f"{gh['dt'].min():%d/%m/%Y}", "last": f"{gh['dt'].max():%d/%m/%Y}"}
     print(f"Gia hạn/đổi điều khoản: {kpi['n_events']} lượt · {kpi['n_ma']} mã · {n_dn} TCPH "
           f"· dư nợ {dno:,.0f} tỷ · {n_cham} mã ({kpi['pct_cham']}%) kèm chậm trả "
           f"· {n_moi} mã có lịch gia hạn mới ({n_kich} kịch trần 2 năm) "
-          f"· {n_qua} mã QUÁ hạn chót pháp lý")
+          f"· {n_qua} mã QUÁ hạn chót pháp lý"
+          + (f" · {n_yk} mã có xin ý kiến trái chủ trước"
+             + (f" (báo trước trung vị {lead_med} ngày)" if lead_med is not None else "") if n_yk else "")
+          + (f" · {n_xp} mã của TCPH bị xử phạt" if n_xp else ""))
     # ev = cấp LƯỢT CBTT (cho biểu đồ theo thời gian); rows = cấp MÃ (cho bảng)
     ev = [{"d": x.ngay_dang_tin, "dn": x.ten_dn, "ma": x.ma_tp, "td": x.tieu_de,
            "nhom": classify(x.ten_dn), "file": x.file_id} for x in gh.itertuples(index=False)]
@@ -610,9 +696,44 @@ def load_dkgd():
     return out
 
 
+HNXLIST = "bond_list_raw.csv"
+
+
+def load_hnx_list():
+    """DANH SÁCH TRÁI PHIẾU của HNX (cấp mã) -> DataFrame đã chuẩn hoá số.
+    Nguồn: /to-chuc-phat-hanh/danh-sach-trai-phieu (bond_list_scraper.py).
+
+    USER CHỐT 22/07/2026: đây là NGUỒN DƯ NỢ CHÍNH THỨC, thay cho cách tự tính
+    (phát hành − mua lại − đáo hạn). Lý do từ đợt đối chiếu 6.795 mã:
+      · 4.248/4.702 mã có ở cả hai nguồn KHỚP CHÍNH XÁC từng đồng (1.129,0 nghìn tỷ)
+        -> cách tự tính đúng, đổi nguồn không phải vì sai mà vì ĐỘ PHỦ;
+      · HNX ghi NGÀY ĐÁO HẠN SAU GIA HẠN (445 mã ta ép về 0 oan = 26,8 nghìn tỷ;
+        mức dời 637-731 ngày, không mã nào vượt trần 2 năm của NĐ08/2023);
+      · HNX có cả TP phát hành TRƯỚC 2021 (322 mã còn dư nợ = 42,5 nghìn tỷ) mà trang
+        "Thông tin phát hành" không lùi tới;
+      · 0/2.041 mã còn KL lưu hành bị quá đáo hạn -> nguồn tự làm sạch, KHÁC VSD
+        (VSD từng có 101 mã "Hiệu lực" dù quá hạn = 63,6 nghìn tỷ).
+    Thiếu file -> trả None -> pipeline lùi về cách tự tính như trước (không gãy).
+    """
+    if not os.path.exists(HNXLIST):
+        return None
+    h = pd.read_csv(HNXLIST)
+    h["ma_tp"] = h["ma_tp"].astype(str).str.strip()
+    h["_k"] = h["ma_tp"].str.upper()
+    h = h.drop_duplicates("_k")
+    mg = h["menh_gia_num"].fillna(0)
+    h["hnx_face"] = h["kl_phat_hanh_num"].fillna(0) * mg
+    h["hnx_rem"] = h["kl_con_luu_hanh_num"].fillna(0) * mg
+    h["hnx_dh"] = pd.to_datetime(h["ngay_dao_han"], format="%d/%m/%Y", errors="coerce")
+    h["hnx_ph"] = pd.to_datetime(h["ngay_phat_hanh"], format="%d/%m/%Y", errors="coerce")
+    return h
+
+
 def compute_outstanding(df, bb):
-    """Dư nợ đang lưu hành cấp mã TP trên universe các đợt PHÁT HÀNH.
-       remaining = (đáo hạn->0) else (có mua lại-> 'còn lại sau mua lại' mới nhất) else (giá trị phát hành)."""
+    """Dư nợ đang lưu hành cấp mã TP.
+       Dư nợ LẤY TỪ 'KL còn lưu hành' của danh sách trái phiếu HNX (xem load_hnx_list);
+       cách tự tính (đáo hạn->0 / còn lại sau mua lại / giá trị phát hành) được GIỮ LẠI ở
+       cột `du_tinh` làm LỚP ĐỐI CHIẾU, và là phương án dự phòng cho mã HNX không liệt kê."""
     today = pd.Timestamp(datetime.now().date())
     iss = df.copy()
     iss["dh"] = pd.to_datetime(iss["ngay_dao_han"], format="%d/%m/%Y", errors="coerce")
@@ -657,35 +778,102 @@ def compute_outstanding(df, bb):
 
     m = pd.concat([face, only], ignore_index=True)
 
-    # ---- GIA HẠN (user chốt 17/07/2026 v2): **NGÀY ĐÁO HẠN GIỮ THEO NGÀY GỐC**.
-    # Đã cân nhắc & BÁC BỎ phương án dời `dh` theo ngày gia hạn mới của VSD: làm vậy sẽ đổi dư nợ
-    # (+6,2 nghìn tỷ) dựa trên nguồn ngoài HNX. User chốt: bảng chính dùng NGÀY GỐC; lịch gia hạn mới
-    # chỉ hiển thị ở BẢNG GIA HẠN RIÊNG (tab Gia hạn) -> xem `load_giahan()`.
-    # `dh_gh` = ngày đáo hạn theo LỊCH GIA HẠN MỚI NHẤT (VSD ghi, chỉ nhận khi HNX có CBTT gia hạn
-    # xác nhận). Chỉ là THÔNG TIN, KHÔNG dùng để tính remaining.
+    # ---- BỔ SUNG UNIVERSE TỪ DANH SÁCH TRÁI PHIẾU HNX (user chốt 22/07/2026) ----------
+    # Mã HNX liệt kê mà ta chưa có (chủ yếu phát hành TRƯỚC 2021 — ngoài tầm với của trang
+    # "Thông tin phát hành"). Nhóm này KHÔNG có dữ liệu đợt phát hành/mua lại nên chỉ điền
+    # được các trường có trong danh sách; `nguon` ghi rõ để bảng chi tiết không gây hiểu nhầm.
+    hl = load_hnx_list()
+    if hl is not None:
+        have = set(m["ma_tp"].astype(str).str.strip().str.upper())
+        add = hl[~hl["_k"].isin(have)].copy()
+        if len(add):
+            add["nhom"] = add["ten_dn"].apply(lambda s: classify_with_source(s)[0])
+            add["khn"] = add["ky_han"].apply(lambda k: tenor_bucket(k, None))
+            add = add.rename(columns={"hnx_face": "face", "hnx_dh": "dh", "ten_dn": "dn",
+                                      "ky_han": "kyhan", "hnx_ph": "ph",
+                                      "lai_suat_num": "coupon"})
+            add["gt_con_lai_num"] = add["hnx_rem"]
+            add["nguon"] = "Danh sách HNX"
+            m = pd.concat([m, add[["ma_tp", "face", "dh", "nhom", "dn", "khn", "kyhan",
+                                   "ph", "coupon", "gt_con_lai_num", "nguon"]]],
+                          ignore_index=True)
+            print(f"Danh sách HNX: bổ sung {len(add):,} mã ngoài phạm vi CBTT phát hành "
+                  f"({int((add['hnx_rem'] > 0).sum()):,} mã còn dư nợ)")
+    # bảng tra theo mã (dùng lại ở phần gia hạn & dư nợ bên dưới)
+    _hk = m["ma_tp"].astype(str).str.strip().str.upper()
+    if hl is not None:
+        hidx = hl.set_index("_k")
+        m["hnx_rem"] = _hk.map(hidx["hnx_rem"])
+        m["hnx_dh"] = _hk.map(hidx["hnx_dh"])
+        m["hnx_face"] = _hk.map(hidx["hnx_face"])
+    else:
+        m["hnx_rem"] = pd.NA
+        m["hnx_dh"] = pd.NaT
+        m["hnx_face"] = pd.NA
+    m["co_hnx"] = m["hnx_rem"].notna()
+
+    # ---- GIA HẠN (user chốt 20/07/2026 — THAY quyết định 17/07 "giữ ngày gốc").
+    # Lý do đảo: quyết định 17/07 dựa trên nhận định "dời ngày theo NGUỒN NGOÀI HNX". Rà lại thấy
+    # KHÔNG đúng — bằng chứng gia hạn nằm ngay trong dữ liệu HNX (`bond_latepay_raw`,
+    # loai_su_kien='gia_han'); VSD chỉ ghi lại lịch mới. `gh_codes` đã lọc đúng nhóm có CBTT HNX.
+    #
+    # Ca lộ ra vấn đề — cụm Sovico, cùng một đợt gia hạn 2 năm, CBTT cách nhau 1 ngày:
+    #   SVBCH2124001-005 (27/09/2023): HNX ĐÃ cập nhật kỳ hạn -> đáo hạn 2026 -> vào dư nợ.
+    #   SVACH2124001-006 (28/09/2023): HNX CHƯA cập nhật -> vẫn ghi 2024 -> remaining=0 -> RỚT
+    #   khỏi dư nợ, dù VSD lẫn chính CBTT của HNX đều xác nhận đáo hạn 2026.
+    # Cùng một chính sách mà hai nửa của một cụm bị xử lý ngược nhau => phải sửa.
+    #
+    # `dh`     = ngày đáo hạn GỐC. GIỮ NGUYÊN — `load_giahan()` cần nó để tính HẠN CHÓT PHÁP LÝ
+    #            (gốc + 730 ngày) và số ngày được gia hạn. Ghi đè `dh` sẽ phá cả hai.
+    # `dh_gh`  = lịch gia hạn mới nhất (chỉ nhận khi HNX có CBTT gia hạn xác nhận).
+    # `dh_eff` = ngày đáo hạn HIỆU LỰC = dh_gh nếu có, không thì dh. Dùng cho VÒNG ĐỜI
+    #            (remaining, trạng thái, kỳ hạn còn lại, năm đáo hạn) và để hiển thị.
+    #
+    # 22/07/2026 — NGUỒN NGÀY GIA HẠN ĐỔI: ưu tiên NGÀY ĐÁO HẠN CỦA DANH SÁCH HNX, VSD chỉ
+    # còn là dự phòng. Danh sách HNX cập nhật ngày sau gia hạn cho 445 mã (so với 13 mã lấy
+    # được từ VSD = phủ gấp 34 lần) và là nguồn CƠ SỞ của dự án chứ không phải nguồn ngoài
+    # -> hết lý do phải chờ CBTT xác nhận mới dám dời ngày.
     gh_codes, xr = load_giahan_codes(), load_xref()
     dh_gh = []
-    for ma, dh in zip(m["ma_tp"], m["dh"]):
+    for ma, dh, hdh in zip(m["ma_tp"], m["dh"], m["hnx_dh"]):
         k = str(ma).strip().upper()
+        if pd.notna(hdh) and (pd.isna(dh) or hdh > dh):
+            dh_gh.append(hdh)                      # HNX tự công bố -> tin ngay
+            continue
         vdh = pd.to_datetime((xr.get(k) or {}).get("dh", ""), format="%d/%m/%Y", errors="coerce")
         dh_gh.append(vdh if (k in gh_codes and pd.notna(vdh) and (pd.isna(dh) or vdh > dh)) else pd.NaT)
     m["dh_gh"] = pd.Series(dh_gh, index=m.index)
+    m["dh_eff"] = m["dh_gh"].where(m["dh_gh"].notna(), m["dh"])
     n_gh = int(m["dh_gh"].notna().sum())
     if n_gh:
-        print(f"Gia hạn: {n_gh} mã có ngày đáo hạn mới (chỉ hiện ở tab Gia hạn; "
-              f"ngày đáo hạn & dư nợ vẫn theo NGÀY GỐC)")
+        n_song = int(((m["dh"] < today) & (m["dh_eff"] >= today)).sum())
+        print(f"Gia hạn: {n_gh} mã có ngày đáo hạn mới (HNX xác nhận); "
+              f"{n_song} mã hết bị coi là đã đáo hạn oan -> tính lại vào dư nợ")
 
-    m["remaining"] = m["gt_con_lai_num"].where(m["gt_con_lai_num"].notna(), m["face"])
-    m.loc[m["dh"] < today, "remaining"] = 0
-    m["remaining"] = m["remaining"].clip(lower=0)
-    m["klcl_nam"] = ((m["dh"] - today).dt.days / 365).round(1)  # kỳ hạn còn lại (năm)
+    # ---- DƯ NỢ ----------------------------------------------------------------------
+    # `du_tinh` = cách TỰ TÍNH cũ (giữ nguyên logic) -> nay là lớp ĐỐI CHIẾU.
+    # Vòng đời tính theo `dh_eff` (đã tính gia hạn), KHÔNG theo `dh` gốc.
+    m["du_tinh"] = m["gt_con_lai_num"].where(m["gt_con_lai_num"].notna(), m["face"])
+    m.loc[m["dh_eff"] < today, "du_tinh"] = 0
+    m["du_tinh"] = m["du_tinh"].clip(lower=0)
+    # `remaining` = SỐ CHÍNH THỨC: ưu tiên KL còn lưu hành của HNX; mã HNX không liệt kê
+    # (64 mã, chủ yếu vừa phát hành chưa kịp lên danh sách) thì dùng số tự tính.
+    m["remaining"] = m["hnx_rem"].where(m["co_hnx"], m["du_tinh"]).astype(float).clip(lower=0)
+    # trạng thái đối chiếu HNX ↔ tự tính, dùng cho cột "Nguồn" ở bảng chi tiết
+    _tol = 0.1 * TY
+    m["khop_hnx"] = [
+        ("Không có ở HNX" if not ch else
+         ("Khớp" if abs((dt or 0) - (hr or 0)) <= _tol else "Lệch"))
+        for ch, dt, hr in zip(m["co_hnx"], m["du_tinh"], m["hnx_rem"])]
+    m.loc[m["nguon"] == "Danh sách HNX", "khop_hnx"] = "Chỉ có ở HNX"
+    m["klcl_nam"] = ((m["dh_eff"] - today).dt.days / 365).round(1)  # kỳ hạn còn lại (năm)
 
     def status(r):
         if r["remaining"] > 0:
             return "Đang lưu hành"
-        return "Đã đáo hạn" if pd.notna(r["dh"]) and r["dh"] < today else "Đã mua lại hết"
+        return "Đã đáo hạn" if pd.notna(r["dh_eff"]) and r["dh_eff"] < today else "Đã mua lại hết"
     m["trang_thai"] = m.apply(status, axis=1)
-    m["nam_dh"] = m["dh"].dt.year
+    m["nam_dh"] = m["dh_eff"].dt.year
 
     # ---- KỲ HẠN GỐC (năm) + NGÀY GIAO DỊCH + TRẠNG THÁI ĐKGD (user 17/07/2026)
     m["kyhan_nam"] = m["kyhan"].apply(tenor_years)
@@ -717,7 +905,7 @@ def compute_outstanding(df, bb):
     _ml = bb.groupby("ma_tp")["gt_mua_lai_num"].sum()
     m["tt_dkgd"] = [_tt_dkgd(tt, gd, rem, dh, _ml.get(ma, 0))
                     for tt, gd, rem, dh, ma in
-                    zip(_tt_cat, m["ngay_gd"], m["remaining"], m["dh"], m["ma_tp"])]
+                    zip(_tt_cat, m["ngay_gd"], m["remaining"], m["dh_eff"], m["ma_tp"])]
     m["ngay_gd_cuoi"] = _gd_cuoi
 
     # ---- LỚP ĐỐI CHIẾU VSD (user chốt 17/07/2026: HNX là CƠ SỞ, VSD chỉ phủ lên)
@@ -770,7 +958,7 @@ def build_outstanding_sheets(wb, out):
         ["CHỈ TIÊU (universe đợt phát hành)", "GIÁ TRỊ (tỷ VNĐ)"],
         ["Tổng phát hành (gross)", out["gross_ty"]],
         ["Đã mua lại trước hạn (lũy kế)", out["buyback_ty"]],
-        ["Dư nợ đang lưu hành (hiện tại)", out["outstanding_ty"]],
+        ["Dư nợ đang lưu hành (hiện tại) - theo KL còn lưu hành HNX", out["outstanding_ty"]],
         ["Số mã còn lưu hành", out["n_active"]],
         ["Số mã đã tất toán (đáo hạn/mua lại hết)", out["n_settled"]],
         ["Số đợt mua lại (universe phát hành)", out["n_buyback_events"]],
@@ -803,25 +991,42 @@ def build_outstanding_sheets(wb, out):
     # Sheet: Chi tiết dư nợ (cấp mã)
     # Dư nợ để MỘT cột (user 17/07: HNX & VSD trùng nhau thì 2 cột gây rối) — cột "Nguồn" nêu rõ
     # khác biệt khi lệch, còn "Giá trị VSD/Chênh" chỉ điền cho dòng KHÔNG khớp.
-    d = m[["ma_tp", "dn", "nhom", "face", "remaining", "kyhan_nam", "ph", "ngay_gd", "dh",
-           "tt_dkgd", "trang_thai", "nguon_dc", "gt_vsd", "chenh_vsd", "nguon"]].copy()
+    # "Ngày đáo hạn" = ngày HIỆU LỰC (đã tính gia hạn). Cột "Đáo hạn gốc" chỉ điền cho mã ĐÃ GIA HẠN
+    # -> đọc là thấy ngay vì sao lệch với bảng phát hành HNX, khỏi phải mở tab Gia hạn.
+    d = m[["ma_tp", "dn", "nhom", "face", "remaining", "du_tinh", "kyhan_nam", "ph", "ngay_gd",
+           "dh_eff", "dh_gh", "dh", "tt_dkgd", "trang_thai", "nguon_dc", "gt_vsd", "chenh_vsd",
+           "nguon"]].copy()
+    d["du_tinh"] = (d["du_tinh"] / TY).round(1)
+    d.loc[m["khop_hnx"].values == "Khớp", "du_tinh"] = None   # khớp -> để trống
     d["face"] = (d["face"] / TY).round(1)
     d["remaining"] = (d["remaining"] / TY).round(1)
     d["ph"] = d["ph"].dt.strftime("%d/%m/%Y")
+    d["dh_eff"] = d["dh_eff"].dt.strftime("%d/%m/%Y")
     d["dh"] = d["dh"].dt.strftime("%d/%m/%Y")
+    d.loc[d["dh_gh"].isna(), "dh"] = None      # chưa gia hạn -> để trống, khỏi lặp lại cột bên cạnh
+    d = d.drop(columns=["dh_gh"])
     khop_mask = m["khop"].values == "Khớp"
     d.loc[khop_mask, ["gt_vsd", "chenh_vsd"]] = None   # khớp -> để trống, khỏi lặp lại số dư nợ
     d = d.sort_values("remaining", ascending=False)
     d.columns = ["Mã TP", "Tổ chức phát hành", "Nhóm", "Giá trị phát hành (tỷ)",
-                 "Dư nợ (tỷ)", "Kỳ hạn gốc (năm)", "Ngày phát hành", "Ngày giao dịch",
-                 "Ngày đáo hạn", "Trạng thái ĐKGD", "Trạng thái dư nợ", "Nguồn",
+                 "Dư nợ (tỷ) - HNX công bố", "Dư nợ tự tính (tỷ) - chỉ khi lệch",
+                 "Kỳ hạn gốc (năm)", "Ngày phát hành", "Ngày giao dịch",
+                 "Ngày đáo hạn", "Đáo hạn gốc - chỉ khi đã gia hạn",
+                 "Trạng thái ĐKGD", "Trạng thái dư nợ", "Nguồn",
                  "Giá trị VSD (tỷ) - chỉ khi lệch", "Chênh HNX-VSD (tỷ)", "Xuất xứ dòng (HNX)"]
     ws2 = wb.create_sheet("Chi tiết dư nợ")
-    write_df(ws2, d, number_cols=["Giá trị phát hành (tỷ)", "Dư nợ (tỷ)",
+    write_df(ws2, d, number_cols=["Giá trị phát hành (tỷ)", "Dư nợ (tỷ) - HNX công bố",
+                                  "Dư nợ tự tính (tỷ) - chỉ khi lệch",
                                   "Giá trị VSD (tỷ) - chỉ khi lệch", "Chênh HNX-VSD (tỷ)"])
 
 
 # ---------- JSON cho dashboard ----------
+def _lls(v):
+    """Loại lãi suất theo CBTT HNX: Cố định / Thả nổi / Kết hợp; rỗng -> 'Không rõ'."""
+    s = "" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v).strip()
+    return s if s else "Không rõ"
+
+
 def build_json(df, out, bb=None, sec=None, rating=None, latepay=None, giahan=None):
     def recs(d):
         return json.loads(d.to_json(orient="records", force_ascii=False))
@@ -851,10 +1056,12 @@ def build_json(df, out, bb=None, sec=None, rating=None, latepay=None, giahan=Non
         ls = x["lai_suat_num"]
         rows.append({
             "ph": x["ngay_phat_hanh"], "dang": x["ngay_dang_tin"],
-            "dh": x.get("ngay_dao_han", ""),
+            "dh": ("" if pd.isna(x.get("ngay_dao_han")) else x.get("ngay_dao_han", "")),
             "y": int(x["y"]), "m": int(x["m"]), "q": int(x["q"]),
             "dn": x["ten_dn"], "ma": x["ma_tp"], "nhom": x["nhom"], "nghn": x.get("nhom_src", ""),
             "kh": x["ky_han"], "khn": x["ky_han_nhom"], "lsn": x["ls_nhom"],
+            # loại lãi suất theo CBTT: Cố định / Thả nổi / Kết hợp (thiếu -> "Không rõ")
+            "lls": _lls(x.get("loai_lai_suat")),
             "gt": round(x["gia_tri_ty"], 1),
             "kl": (None if pd.isna(x.get("khoi_luong_num")) else int(x["khoi_luong_num"])),
             "ls": (None if pd.isna(ls) else round(float(ls), 2)),
@@ -866,6 +1073,10 @@ def build_json(df, out, bb=None, sec=None, rating=None, latepay=None, giahan=Non
     # dòng cấp-mã cho tab "Đang lưu hành" (chỉ trái phiếu còn dư nợ)
     out_rows = []
     if out is not None:
+        # loại lãi suất lấy theo bản phát hành MỚI NHẤT của mã; mã chỉ dựng từ CBTT mua lại
+        # (phát hành trước 2021) không có bản ghi phát hành -> "Không rõ".
+        _l = df.sort_values("ph_date")
+        lls_map = dict(zip(_l["ma_tp"], _l["loai_lai_suat"]))
         od = out["detail"]
         act = od[od["remaining"] > 0].copy()
         for _, x in act.iterrows():
@@ -873,8 +1084,15 @@ def build_json(df, out, bb=None, sec=None, rating=None, latepay=None, giahan=Non
                 "ma": x["ma_tp"], "dn": x["dn"], "nhom": x["nhom"],
                 "gt": round(x["remaining"] / TY, 1), "face": round(x["face"] / TY, 1),
                 "ls": (None if pd.isna(x["coupon"]) else round(float(x["coupon"]), 2)),
-                "khn": x["khn"], "dh": (x["dh"].strftime("%d/%m/%Y") if pd.notna(x["dh"]) else ""),
-                "y": (int(x["dh"].year) if pd.notna(x["dh"]) else 0),
+                "lls": _lls(lls_map.get(x["ma_tp"])),
+                # ngày đáo hạn HIỆU LỰC (đã tính gia hạn); `dhg` chỉ có khi mã đã được gia hạn
+                "khn": x["khn"],
+                "dh": (x["dh_eff"].strftime("%d/%m/%Y") if pd.notna(x["dh_eff"]) else ""),
+                "y": (int(x["dh_eff"].year) if pd.notna(x["dh_eff"]) else 0),
+                # quý/tháng ĐÁO HẠN — để tab Lưu hành dùng chung bộ lọc năm/quý/tháng
+                "q": (int(x["dh_eff"].quarter) if pd.notna(x["dh_eff"]) else 0),
+                "m": (int(x["dh_eff"].month) if pd.notna(x["dh_eff"]) else 0),
+                "dhg": (x["dh"].strftime("%d/%m/%Y") if pd.notna(x["dh_gh"]) and pd.notna(x["dh"]) else ""),
                 "klcl": (None if pd.isna(x["klcl_nam"]) else float(x["klcl_nam"])),
                 "nguon": x["nguon"],
                 "kyn": (None if pd.isna(x["kyhan_nam"]) else float(x["kyhan_nam"])),
@@ -883,6 +1101,9 @@ def build_json(df, out, bb=None, sec=None, rating=None, latepay=None, giahan=Non
                 # pandas biến None -> NaN khi cột lẫn số => phải dùng pd.isna, `is None` KHÔNG bắt được
                 # (NaN lọt sang JS thành NaN, cột hiện "0" thay vì "–").
                 "khop": x["khop"], "nvsd": x["nguon_vsd"],
+                # đối chiếu DƯ NỢ CHÍNH THỨC (HNX công bố) với cách tự tính của dự án
+                "khnx": x["khop_hnx"],
+                "dtin": (None if pd.isna(x["du_tinh"]) else round(float(x["du_tinh"]) / TY, 1)),
                 "gvsd": (None if pd.isna(x["gt_vsd"]) else float(x["gt_vsd"])),
                 "chvsd": (None if pd.isna(x["chenh_vsd"]) else float(x["chenh_vsd"])),
             })
@@ -908,7 +1129,21 @@ def build_json(df, out, bb=None, sec=None, rating=None, latepay=None, giahan=Non
                 "tt": x.get("tinh_trang", ""),
             })
 
+    # ---- MÃ HIỂN THỊ THỐNG NHẤT (user chốt 22/07/2026) ------------------------------
+    # HNX tồn tại 2 hệ mã cho cùng một trái phiếu: mã CBTT (bản công bố phát hành, vd
+    # VJCH2101) và mã giao dịch/ĐKGD 8 ký tự (vd VJC12101). Trước đây mỗi tab hiển thị
+    # theo hệ mã của nguồn nó dùng -> cùng một TP mang 2 tên khác nhau tuỳ tab.
+    # Quy ước: CÓ mã giao dịch thì hiển thị mã giao dịch; không có thì giữ mã CBTT.
+    #   `ma`  = mã CBTT — GIỮ NGUYÊN vì mọi phép nối giữa các bộ dữ liệu đều theo mã này
+    #   `mgd` = mã giao dịch (rỗng nếu chưa ĐKGD)
+    #   `mah` = mã hiển thị = mgd or ma  (cột bảng sắp xếp/lọc theo trường này)
+    # Chỉ xuất BẢNG TRA mã CBTT -> mã giao dịch; dashboard tự gắn `mgd`/`mah` cho mọi bộ
+    # dữ liệu (kể cả các bảng được dựng bằng JS như danh sách chậm trả) -> một nguồn sự thật.
+    gd_map = {k: v["ma_gd"] for k, v in load_dkgd().items() if v.get("ma_gd")}
+    print(f"Mã giao dịch (ĐKGD): {len(gd_map)} mã CBTT có mã GD 8 ký tự")
+
     data = {
+        "mgd_map": gd_map,
         "updated": datetime.now().strftime("%d/%m/%Y %H:%M"),
         "data_date": f"{df['post_date'].max():%d/%m/%Y}",
         "groups": group_order,
@@ -922,15 +1157,19 @@ def build_json(df, out, bb=None, sec=None, rating=None, latepay=None, giahan=Non
         "giahan": giahan,
         "updates": load_updates(),
     }
+    # NaN/Infinity không phải JSON hợp lệ. Python vẫn ghi ra chữ 'NaN', và vì data được
+    # nhúng thành `const DATA={...}` nên trình duyệt đọc thành số NaN -> hỏng thang đo chart.
+    # Quét sạch trước khi ghi, rồi dump với allow_nan=False để lần sau lỗi nổ ngay lúc build.
+    data = sanitize_nan(data)
     with open("dashboard_data.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
+        json.dump(data, f, ensure_ascii=False, allow_nan=False)
     print("Đã tạo dashboard_data.json")
 
     # nhúng data vào dashboard.html (self-contained, mở offline được)
     try:
         with open("dashboard_template.html", encoding="utf-8") as f:
             tpl = f.read()
-        html = tpl.replace("__DATA__", json.dumps(data, ensure_ascii=False))
+        html = tpl.replace("__DATA__", json.dumps(data, ensure_ascii=False, allow_nan=False))
         with open("dashboard.html", "w", encoding="utf-8") as f:
             f.write(html)
         print("Đã tạo dashboard.html")
@@ -956,7 +1195,8 @@ if __name__ == "__main__":
     if rating is None:
         print("(!) Chưa có bond_rating_raw.csv - bỏ qua tab Xếp hạng tín nhiệm.")
     dno_map = outstanding_by_bond(df, bb if out is not None else None)
-    latepay = load_latepay(dno_map, out["outstanding_ty"] if out is not None else None)
+    news = load_news()
+    latepay = load_latepay(dno_map, out["outstanding_ty"] if out is not None else None, news)
     if latepay is None:
         print("(!) Chưa có bond_latepay_raw.csv - bỏ qua tab Chậm trả gốc/lãi.")
     build_excel(df, out)

@@ -41,9 +41,19 @@ SOURCES = [
      ["ma_tp", "ngay_mua_lai", "ngay_dang_tin"], [], "ten_dn", True),
     ("Danh mục",   ["bond_catalog_scraper.py"], "bond_catalog_raw.csv",
      ["ma_cbtt"], ["trang_thai"], "ten_tcph", True),
+    # Danh sách trái phiếu = NGUỒN DƯ NỢ CHÍNH THỨC (user chốt 22/07/2026). Theo dõi
+    # `kl_con_luu_hanh` để diff bắt mua lại/tất toán, và `ngay_dao_han` để bắt GIA HẠN
+    # (HNX cập nhật ngày mới ngay trên danh sách này) — hai tín hiệu đắt giá nhất.
+    ("DS trái phiếu", ["bond_list_scraper.py"], "bond_list_raw.csv",
+     ["ma_tp"], ["kl_con_luu_hanh", "ngay_dao_han", "tinh_trang"], "ten_dn", True),
     ("Xếp hạng",   ["bond_rating_scraper.py"], "bond_rating_raw.csv",
      ["ten_tcph", "ma_tp", "loai_xep_hang"], ["ket_qua_xhtn", "hieu_luc_tu_ngay"], "ten_tcph", True),
     ("Chậm trả",   ["bond_latepay_scraper.py"], "bond_latepay_raw.csv",
+     ["article_id"], ["tinh_trang", "loai_su_kien"], "ten_dn", True),
+    # Tin khác = kênh KHẮC PHỤC chậm trả (DN công bố đã trả ở tab này, không phải tab
+    # Tin bất thường) -> phải cập nhật cùng nhịp với Chậm trả, nếu không trạng thái
+    # "đang chậm trả" sẽ treo oan.
+    ("Tin khác",   ["bond_news_scraper.py"], "bond_news_raw.csv",
      ["article_id"], ["tinh_trang", "loai_su_kien"], "ten_dn", True),
     ("Ngành ICB",  ["vietcap_sector_scraper.py"], "vietcap_companies_raw.csv",
      ["code"], [], "name", False),

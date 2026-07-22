@@ -111,6 +111,68 @@ def to_number(s):
         return None
 
 
+def _dt(s):
+    """'18/05/2022' -> datetime để so bản CBTT mới/cũ; hỏng/rỗng -> coi như rất cũ."""
+    try:
+        return datetime.strptime((s or "").strip(), "%d/%m/%Y")
+    except ValueError:
+        return datetime.min
+
+
+def dedupe(rows, verbose=True):
+    """Khử bản CBTT ĐÃ BỊ THAY THẾ (STT reset mỗi trang nên không dùng làm khoá).
+
+    HNX giữ CẢ bản gốc lẫn bản đính chính của cùng một đợt: bản cũ bị đánh dấu
+    'Hết hiệu lực', bản mới 'Hiệu lực', hai bản khác nhau ở `ngay_dang_tin` + `file_id`.
+    Khoá cũ có `ngay_dang_tin` nên CẢ HAI cùng lọt -> thổi tổng giá trị phát hành
+    (đo 17/07/2026: thừa 123 dòng / 108.429 tỷ; riêng 2021 +36.300 tỷ, 2025 +17.140 tỷ).
+
+    KHÔNG khử theo `ma_tp` đơn thuần: 14 mã có NHIỀU ĐỢT thật — vd BPGCH2135001 phát hành
+    24/06/2021 (415 tỷ) và 21/09/2021 (185 tỷ) — khử theo mã sẽ nuốt mất đợt.
+
+    Hai quy tắc:
+      (a) bỏ dòng 'Hết hiệu lực' nếu cùng `ma_tp` có dòng đăng tin MUỘN HƠN. Bắt được cả ca
+          đính chính chính NGÀY PHÁT HÀNH mà khoá (mã, ngày PH) bỏ lọt (CTGL2129016:
+          24/10 -> 24/09/2021; MRBCH2125001: 18/08 -> 19/08/2021).
+      (b) còn trùng (ma_tp, ngay_phat_hanh) -> giữ bản `ngay_dang_tin` mới nhất.
+
+    Dòng 'Hết hiệu lực' KHÔNG có bản thay thế (24 dòng / 14.381 tỷ) thì GIỮ: chưa xác định
+    được là đợt phát hành bị huỷ hay chỉ rút CBTT, loại đi sẽ mất dữ liệu thật.
+    """
+    moi_nhat = {}
+    for r in rows:
+        k = (r.get("ma_tp") or "").strip().upper()
+        d = _dt(r.get("ngay_dang_tin"))
+        if k and (k not in moi_nhat or d > moi_nhat[k]):
+            moi_nhat[k] = d
+
+    giu, bo_a = [], 0
+    for r in rows:
+        k = (r.get("ma_tp") or "").strip().upper()
+        if (r.get("tinh_trang") or "").strip() == "Hết hiệu lực" \
+                and k in moi_nhat and moi_nhat[k] > _dt(r.get("ngay_dang_tin")):
+            bo_a += 1
+            continue
+        giu.append(r)
+
+    tot = {}
+    for r in giu:
+        k = ((r.get("ma_tp") or "").strip().upper(), (r.get("ngay_phat_hanh") or "").strip())
+        cu = tot.get(k)
+        if cu is None or _dt(r.get("ngay_dang_tin")) > _dt(cu.get("ngay_dang_tin")):
+            tot[k] = r
+    bo_b = len(giu) - len(tot)
+
+    out = [r for r in giu if tot.get(((r.get("ma_tp") or "").strip().upper(),
+                                     (r.get("ngay_phat_hanh") or "").strip())) is r]
+    if verbose and (bo_a or bo_b):
+        gt = sum(r.get("gia_tri_phat_hanh") or 0 for r in rows) - \
+             sum(r.get("gia_tri_phat_hanh") or 0 for r in out)
+        print(f"Khử trùng CBTT: bỏ {bo_a} bản đã bị thay thế + {bo_b} bản trùng khoá "
+              f"= {len(rows) - len(out)} dòng / {gt/1e9:,.0f} tỷ")
+    return out
+
+
 def scrape():
     session, token, soup = get_session_token()
     post_headers = {"CP-TOKEN": token,
@@ -164,13 +226,7 @@ def scrape():
         page += 1
         time.sleep(DELAY)
 
-    # khử trùng lặp theo mã TP + ngày phát hành (STT reset mỗi trang)
-    seen, unique = set(), []
     for r in all_rows:
-        k = (r.get("ma_tp"), r.get("ngay_phat_hanh"), r.get("ngay_dang_tin"))
-        if k in seen:
-            continue
-        seen.add(k)
         r["khoi_luong_num"] = to_number(r.get("khoi_luong"))
         r["menh_gia_num"] = to_number(r.get("menh_gia"))
         r["lai_suat_num"] = to_number(r.get("lai_suat"))
@@ -178,8 +234,7 @@ def scrape():
             r["gia_tri_phat_hanh"] = r["khoi_luong_num"] * r["menh_gia_num"]
         else:
             r["gia_tri_phat_hanh"] = None
-        unique.append(r)
-    return unique, total
+    return dedupe(all_rows), total
 
 
 def save_csv(rows, path="bond_issuance_raw.csv"):

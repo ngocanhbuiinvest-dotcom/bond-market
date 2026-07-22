@@ -89,6 +89,22 @@ def classify_event(title):
                             "dieu kien, dieu khoan", "noi dung ky han", "thay doi ky han",
                             "dieu chinh ky han"]):
         return "gia_han"
+    # ---- BỔ SUNG 22/07/2026: hai nhóm nằm sẵn trong 1.250 tin trước đây bỏ trống ----
+    # Đặt SAU gia_han có chủ ý: "Nghị quyết người sở hữu TP về việc gia hạn" bản chất là
+    # gia hạn (đã có kết quả), không phải mới đang xin ý kiến.
+    #
+    # 'y_kien_trai_chu' = MẮT XÍCH SỚM NHẤT của chuỗi tái cơ cấu nợ: luật buộc phải lấy ý
+    # kiến/họp người sở hữu trái phiếu TRƯỚC khi gia hạn, mà gia hạn lại đi trước chậm trả
+    # -> chuỗi 3 tầng: xin ý kiến → gia hạn → chậm trả.
+    if any(k in t for k in ["y kien nguoi so huu", "y kien trai chu", "lay y kien",
+                            "xin y kien", "y kien cua nguoi so huu",
+                            "hoi nghi nguoi so huu", "dai hoi nguoi so huu",
+                            "hop nguoi so huu", "nghi quyet nguoi so huu"]):
+        return "y_kien_trai_chu"
+    # 'xu_phat' = bị cơ quan quản lý (UBCKNN/thuế) xử phạt vi phạm hành chính — tín hiệu
+    # rủi ro độc lập với dòng tiền, đến từ BÊN THỨ BA chứ không phải TCPH tự khai.
+    if any(k in t for k in ["xu phat vi pham hanh chinh", "quyet dinh xu phat"]):
+        return "xu_phat"
     return ""
 
 
